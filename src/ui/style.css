@@ -1,0 +1,440 @@
+@import 'tailwindcss';
+
+/* ── Design Tokens (Playful Geometric) ──────────────────── */
+:root {
+  --bg: #FFFDF5;
+  --fg: #1E293B;
+  --muted: #F1F5F9;
+  --muted-fg: #64748B;
+  --accent: #8B5CF6;
+  --accent-fg: #FFFFFF;
+  --secondary: #F472B6;
+  --tertiary: #FBBF24;
+  --quaternary: #34D399;
+  --border: #E2E8F0;
+  --card: #FFFFFF;
+  --code-bg: #0F172A;
+
+  --font-heading: 'Outfit', system-ui, sans-serif;
+  --font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
+
+  --bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Base ──────────────────────────────────────────────── */
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* ── Header ───────────────────────────────────────────── */
+.plugin-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--card);
+  border-bottom: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+.logo-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--fg);
+  box-shadow: 2px 2px 0 var(--fg);
+  flex-shrink: 0;
+}
+
+.plugin-title {
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.header-dots {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.deco-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+/* ── Tabs ─────────────────────────────────────────────── */
+.tab-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+
+.tab-btn {
+  padding: 5px 14px;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 12px;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 200ms var(--bounce);
+  background: transparent;
+  color: var(--muted-fg);
+}
+
+.tab-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--fg);
+  box-shadow: 2px 2px 0 var(--fg);
+}
+
+.tab-btn:not(.active):hover {
+  background: color-mix(in srgb, var(--tertiary) 25%, transparent);
+  color: var(--fg);
+}
+
+/* ── Content Area ─────────────────────────────────────── */
+.content-area {
+  flex: 1;
+  overflow: hidden;
+  padding: 0 12px 12px;
+  min-height: 0;
+}
+
+.code-panel {
+  height: 100%;
+  overflow: auto;
+  border-radius: 16px;
+  border: 2px solid var(--fg);
+  background: var(--code-bg);
+  padding: 12px;
+  box-shadow: 4px 4px 0 var(--border);
+}
+
+.code-text {
+  font-size: 11px;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+  white-space: pre-wrap;
+  line-height: 1.625;
+  word-break: break-word;
+  color: #E2E8F0;
+}
+
+/* ── Empty State ──────────────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 10px;
+  text-align: center;
+  padding: 24px;
+  user-select: none;
+}
+
+.empty-state .empty-title {
+  font-family: var(--font-heading);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted-fg);
+}
+
+.empty-state .empty-hint {
+  font-size: 11px;
+  color: var(--muted-fg);
+  opacity: 0.65;
+  line-height: 1.5;
+}
+
+/* ── Actions ──────────────────────────────────────────── */
+.actions-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+.download-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Primary Button ("Candy Button") ──────────────────── */
+.btn-candy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  border: 2px solid var(--fg);
+  border-radius: 9999px;
+  box-shadow: 3px 3px 0 var(--fg);
+  cursor: pointer;
+  transition: all 200ms var(--bounce);
+  width: 100%;
+}
+
+.btn-candy:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--fg);
+}
+
+.btn-candy:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--fg);
+}
+
+.btn-candy:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.btn-candy.copied {
+  background: var(--quaternary);
+}
+
+.btn-candy.copy-failed {
+  background: #EF4444;
+}
+
+/* ── Secondary Button ─────────────────────────────────── */
+.btn-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--card);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 11px;
+  border: 2px solid var(--fg);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 200ms var(--bounce);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--tertiary);
+  transform: translate(-1px, -1px);
+  box-shadow: 2px 2px 0 var(--fg);
+}
+
+.btn-secondary:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+  background: var(--tertiary);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  border-color: var(--border);
+  color: var(--muted-fg);
+  background: transparent;
+}
+
+.btn-secondary.saved {
+  background: var(--quaternary);
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+/* ── Export Row ────────────────────────────────────────── */
+.export-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.export-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-fg);
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── Select ───────────────────────────────────────────── */
+.geo-select {
+  flex: 1;
+  padding: 4px 8px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.geo-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 3px 3px 0 var(--accent);
+}
+
+/* ── Status Bar ───────────────────────────────────────── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-fg);
+  border-top: 2px solid var(--border);
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--muted-fg);
+  flex-shrink: 0;
+  transition: background 300ms ease;
+}
+
+/* ── Version Label ───────────────────────────────────── */
+.version-label {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted-fg);
+  opacity: 0.6;
+  font-family: ui-monospace, 'SF Mono', monospace;
+}
+
+/* ── Update Banner ───────────────────────────────────── */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--tertiary) 20%, var(--bg));
+  border-top: 2px solid var(--tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg);
+  flex-shrink: 0;
+}
+
+.update-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 700;
+}
+
+.update-link:hover {
+  color: var(--secondary);
+}
+
+/* ── Scrollbar ────────────────────────────────────────── */
+.code-panel::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.code-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.code-panel::-webkit-scrollbar-thumb {
+  background: rgba(139, 92, 246, 0.25);
+  border-radius: 3px;
+}
+
+.code-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.45);
+}
+
+/* ── Focus Rings (Keyboard Accessibility) ─────────────── */
+.tab-btn:focus-visible,
+.btn-candy:focus-visible,
+.btn-secondary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.geo-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Tab Crossfade ────────────────────────────────────── */
+@keyframes fade-slide-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.code-panel.fade-in {
+  animation: fade-slide-in 200ms ease-out;
+}
+
+/* ── Loading Dot Pulse ────────────────────────────────── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.3; transform: scale(0.6); }
+}
+
+.status-dot.loading {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+/* ── Copy Feedback Bounce ─────────────────────────────── */
+@keyframes pop-feedback {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+.btn-candy.copied,
+.btn-candy.copy-failed {
+  animation: pop-feedback 300ms var(--bounce);
+}
+
+/* ── Utility Override ──────────────────────────────────── */
+/* Tailwind v4 puts .hidden in @layer utilities, which loses
+   to our unlayered component styles. Re-declare here so
+   display:none wins when .hidden is toggled via JS. */
+.hidden {
+  display: none;
+}
+
+/* ── Reduced Motion ───────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

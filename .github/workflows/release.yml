@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - run: pnpm test
+
+      - run: pnpm build
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Find the previous tag
+          PREV_TAG=$(git tag --sort=-version:refname | head -n 2 | tail -n 1)
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$(git describe --tags --abbrev=0)" ]; then
+            # First release — list all commits
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD")
+          fi
+          # Write to env using heredoc for multiline
+          {
+            echo "CHANGELOG<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Package plugin
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          mkdir -p figma-to-prompt
+          cp manifest.json figma-to-prompt/
+          cp -r dist figma-to-prompt/
+          zip -r "figma-to-prompt-${TAG_NAME}.zip" figma-to-prompt/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: figma-to-prompt-*.zip
+          body: |
+            ## What's Changed
+
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ---
+            Download `figma-to-prompt-*.zip`, unzip, and import `manifest.json` into Figma Desktop.

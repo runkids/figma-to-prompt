@@ -1,0 +1,32 @@
+{
+  "name": "figma-to-prompt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:sandbox": "vite build --watch --config vite.config.sandbox.ts",
+    "dev:ui": "vite build --watch --config vite.config.ui.ts",
+    "build": "pnpm run build:sandbox && pnpm run build:ui",
+    "build:sandbox": "vite build --config vite.config.sandbox.ts",
+    "build:ui": "vite build --config vite.config.ui.ts",
+    "lint": "oxlint src/ tests/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "release": "./scripts/release.sh",
+    "prepare": "simple-git-hooks"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm lint"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.106.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "oxlint": "^1.60.0",
+    "simple-git-hooks": "^2.13.1",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.8.0",
+    "vite": "^8.0.0",
+    "vite-plugin-singlefile": "^2.0.0",
+    "vitest": "^3.1.0"
+  }
+}
