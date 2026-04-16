@@ -1,7 +1,7 @@
 import type { UISerializedNode, ImageNameOverrides } from '../shared/types';
 
 /** Sanitize user-supplied filename fragments to the same character class used by auto-naming */
-function sanitizeFileName(s: string): string {
+export function sanitizeFileName(s: string): string {
   return s.replace(/[^a-zA-Z0-9-_]/g, '_');
 }
 

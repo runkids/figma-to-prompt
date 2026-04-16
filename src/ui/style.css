@@ -28,6 +28,16 @@ body {
   color: var(--fg);
 }
 
+/* Preact mount point — forwards body's flex column context so children's
+   `flex: 1` / `flex-shrink: 0` actually take effect. `min-height: 0` lets
+   nested `overflow: auto` panels scroll instead of forcing the column tall. */
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 /* ── Header ───────────────────────────────────────────── */
 .plugin-header {
   display: flex;

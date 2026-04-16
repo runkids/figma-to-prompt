@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@figma/plugin-typings": "^1.106.0",
+    "@preact/preset-vite": "^2.10.5",
     "@tailwindcss/vite": "^4.1.0",
     "oxlint": "^1.60.0",
     "simple-git-hooks": "^2.13.1",
@@ -28,5 +29,8 @@
     "vite": "^8.0.0",
     "vite-plugin-singlefile": "^2.0.0",
     "vitest": "^3.1.0"
+  },
+  "dependencies": {
+    "preact": "^10.29.1"
   }
 }

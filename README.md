@@ -57,7 +57,7 @@ Then follow [Import into Figma](#import-into-figma).
    - **JSON** — Structured design data
    - **Prompt** — AI-ready markdown prompt
 4. **Copy** — Click the copy button to copy to clipboard
-5. **Download** — Save as `.json`, `.md`, or export images (PNG/JPG/SVG, 1x–4x)
+5. **Download** — Save as images (PNG/JPG/SVG, 1x–4x)
 6. Paste the prompt into your AI tool and generate frontend code
 
 ## Use with AI Coding Agents
@@ -165,11 +165,16 @@ src/
 │   ├── main.ts       # Selection listener → extract → normalize → postMessage
 │   ├── extractor.ts  # Walks SceneNode tree → UISerializedNode
 │   └── normalizer.ts # Normalizes values (hex colors, line-height, etc.)
-├── ui/               # iframe (no Figma API access)
-│   ├── main.ts       # Tabs, copy, downloads, message handling
+├── ui/               # iframe (Preact, no Figma API access)
+│   ├── ui.html       # Root mount point
+│   ├── index.tsx     # Preact entry — renders <App />
+│   ├── App.tsx       # Reducer + sandbox message bridge
+│   ├── state.ts      # Reducer + actions (single source of truth)
 │   ├── prompt.ts     # Generates the AI markdown prompt
-│   ├── ui.html       # Plugin panel HTML
-│   └── style.css     # Tailwind CSS
+│   ├── utils.ts      # sanitizeName, copyToClipboard, ext helpers
+│   ├── download.ts   # Blob/ZIP download helpers
+│   ├── style.css     # Tailwind CSS
+│   └── components/   # Header, TabBar, CodePanel, ExportCard, …
 └── shared/
     └── types.ts      # Shared type definitions
 ```
@@ -179,6 +184,7 @@ src/
 ## Tech Stack
 
 - **TypeScript**
+- **Preact** — UI framework (with React-compat alias for ecosystem libs)
 - **Vite** — Dual config bundler (sandbox + UI)
 - **Vitest** — Unit testing
 - **Tailwind CSS v4** — UI styling

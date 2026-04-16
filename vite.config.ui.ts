@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
+import preact from '@preact/preset-vite';
 import tailwindcss from '@tailwindcss/vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 
@@ -14,7 +15,16 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(version),
   },
-  plugins: [tailwindcss(), viteSingleFile({ removeViteModuleLoader: true })],
+  // `react`/`react-dom` aliases let any future React-ecosystem dep resolve to
+  // Preact's compat layer without code changes. Preact itself uses `preact/jsx-runtime`
+  // (configured via tsconfig.ui.json + @preact/preset-vite).
+  resolve: {
+    alias: {
+      react: 'preact/compat',
+      'react-dom': 'preact/compat',
+    },
+  },
+  plugins: [preact(), tailwindcss(), viteSingleFile({ removeViteModuleLoader: true })],
   build: {
     outDir: resolve(import.meta.dirname, 'dist'),
     emptyOutDir: false,

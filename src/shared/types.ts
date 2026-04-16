@@ -129,11 +129,13 @@ export type ExportMode = 'per-image' | 'merged';
  *  Empty string means "fall back to auto-generated name". */
 export type ImageNameOverrides = Record<string, string>;
 
+export type ImageFormat = 'PNG' | 'JPG' | 'SVG';
+
 /** Messages sent from UI → Sandbox */
 export interface ExportImagesMessage {
   type: 'export-images';
   scale: number;
-  format: 'PNG' | 'JPG' | 'SVG';
+  format: ImageFormat;
   mode: ExportMode;
 }
 
