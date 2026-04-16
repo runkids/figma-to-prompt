@@ -144,20 +144,6 @@ pnpm build
 
 Outputs `dist/code.js` (sandbox) and `dist/ui.html` (UI panel).
 
-### Release
-
-```bash
-pnpm release
-```
-
-Interactive version picker → updates `package.json` → commits → tags. Then push:
-
-```bash
-git push origin main --tags
-```
-
-GitHub Actions builds, packages the zip, and creates a Release with changelog.
-
 ## Tech Stack
 
 - **TypeScript**
