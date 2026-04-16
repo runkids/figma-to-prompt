@@ -39,8 +39,7 @@ Then follow [Import into Figma](#import-into-figma).
 
 1. Open **Figma Desktop** and any design file
 2. Click the **+** button in the top-right, then select **Import plugin from manifest...**
-
-   ![Import plugin](.github/workflows/assets/import.png)
+   <img src=".github/workflows/assets/import.png" alt="Import plugin" width="360" />
 
 3. Select the `manifest.json` from the unzipped folder (or cloned repo root)
 4. Done! **Figma to Prompt** appears under **Plugins** → **Development**
@@ -60,6 +59,22 @@ Then follow [Import into Figma](#import-into-figma).
 4. **Copy** — Click the copy button to copy to clipboard
 5. **Download** — Save as `.json`, `.md`, or export images (PNG/JPG/SVG, 1x–4x)
 6. Paste the prompt into your AI tool and generate frontend code
+
+## Use with AI Coding Agents
+
+### Install Skill (Recommended)
+
+This repo includes a [design-to-code skill](skills/figma-to-prompt/SKILL.md) that teaches AI agents how to interpret plugin output and generate accurate UI components. Compatible with any agent that supports the skillshare format.
+
+```bash
+skillshare install runkids/figma-to-prompt
+```
+
+Once installed, paste the copied prompt or JSON — the agent will automatically understand the node structure, map layout to flexbox, convert styles to CSS, and handle component dependencies.
+
+### Direct Paste
+
+No setup needed — paste the **Prompt** tab output directly into ChatGPT, Claude, Gemini, Copilot, or any LLM. The prompt includes conversion guidelines, design tokens, and the full component structure.
 
 ## Output Example
 
