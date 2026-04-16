@@ -1,4 +1,9 @@
-import type { UISerializedNode } from '../shared/types';
+import type { UISerializedNode, ImageNameOverrides } from '../shared/types';
+
+/** Sanitize user-supplied filename fragments to the same character class used by auto-naming */
+function sanitizeFileName(s: string): string {
+  return s.replace(/[^a-zA-Z0-9-_]/g, '_');
+}
 
 /**
  * Recursively counts a node and all its children.
@@ -185,17 +190,20 @@ export interface ImageAsset {
   scaleMode?: string;
 }
 
-export function collectImageAssets(node: UISerializedNode): ImageAsset[] {
+export function collectImageAssets(
+  node: UISerializedNode,
+  overrides?: ImageNameOverrides,
+): ImageAsset[] {
   const assets = new Map<string, ImageAsset>();
 
   function walk(n: UISerializedNode, parentName?: string): void {
     if (n.visible === false) return;
     if (n.style?.imageFillHash && !assets.has(n.style.imageFillHash)) {
-      // Use "Parent_Child" naming for context — helps AI distinguish images
-      const contextName = parentName && parentName !== n.name
-        ? `${parentName}_${n.name}`
-        : n.name;
-      const safeName = contextName.replace(/[^a-zA-Z0-9-_]/g, '_');
+      // User override takes precedence; fall back to "Parent_Child" auto-naming
+      const override = overrides?.[n.id]?.trim();
+      const safeName = override
+        ? sanitizeFileName(override)
+        : sanitizeFileName(parentName && parentName !== n.name ? `${parentName}_${n.name}` : n.name);
       assets.set(n.style.imageFillHash, {
         hash: n.style.imageFillHash,
         nodeId: n.id,
@@ -319,11 +327,18 @@ function formatTypoLine(t: TypoEntry): string {
 
 // ── Main Prompt Builder ───────────────────────────────────
 
+export interface BuildPromptOptions {
+  /** Per-node filename overrides applied to the Assets section */
+  imageNameOverrides?: ImageNameOverrides;
+  /** Merged composite reference — shown as a single whole-frame asset line */
+  merged?: { name: string; width: number; height: number };
+}
+
 /**
  * Generates a structured prompt from a UISerializedNode tree,
  * designed to let an AI reproduce the component at 99% fidelity.
  */
-export function buildPrompt(node: UISerializedNode): string {
+export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions): string {
   const tokens = collectTokens(node);
   const deps = collectComponentDeps(node);
   const details = buildNodeDetails(node);
@@ -392,14 +407,22 @@ export function buildPrompt(node: UISerializedNode): string {
   }
 
   // Image Assets
-  const imageAssets = collectImageAssets(node);
-  if (imageAssets.length > 0) {
-    const assetLines = imageAssets.map((a) => {
+  const imageAssets = collectImageAssets(node, options?.imageNameOverrides);
+  const merged = options?.merged;
+  if (imageAssets.length > 0 || merged) {
+    const assetLines: string[] = [];
+    if (merged) {
+      const mergedSafe = sanitizeFileName(merged.name);
+      assetLines.push(
+        `- \`${mergedSafe}.png\` → whole composite (${merged.width}×${merged.height}) — use as visual reference for the entire frame`,
+      );
+    }
+    for (const a of imageAssets) {
       let line = `- \`${a.fileName}\` → ${a.nodeName} (${a.width}×${a.height}`;
       if (a.scaleMode) line += `, ${a.scaleMode}`;
       line += ')';
-      return line;
-    });
+      assetLines.push(line);
+    }
     sections.push(`## Assets\nImage files included with this spec — use as \`<img>\` or CSS \`background-image\`:\n${assetLines.join('\n')}`);
   }
 

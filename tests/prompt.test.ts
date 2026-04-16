@@ -370,6 +370,28 @@ describe('image assets', () => {
       expect(names[1]).toBe('Row_Object_2.png');
       expect(names[2]).toBe('Row_Object_3.png');
     });
+
+    it('applies filename overrides from user input', () => {
+      const assets = collectImageAssets(nodeWithImage, { '2': 'hero_bg' });
+      expect(assets[0].fileName).toBe('hero_bg.png');
+      // Non-overridden node keeps auto naming
+      expect(assets[1].fileName).toBe('Hero_Section_Profile_Avatar.png');
+    });
+
+    it('resolves override collisions with _N suffix', () => {
+      const assets = collectImageAssets(nodeWithImage, { '2': 'dup', '3': 'dup' });
+      expect(assets.map((a) => a.fileName)).toEqual(['dup_1.png', 'dup_2.png']);
+    });
+
+    it('sanitizes invalid chars in overrides', () => {
+      const assets = collectImageAssets(nodeWithImage, { '2': 'my image!' });
+      expect(assets[0].fileName).toBe('my_image_.png');
+    });
+
+    it('empty string override falls back to auto name', () => {
+      const assets = collectImageAssets(nodeWithImage, { '2': '' });
+      expect(assets[0].fileName).toBe('Hero_Section_Hero_Background.png');
+    });
   });
 
   describe('buildPrompt with images', () => {
@@ -384,6 +406,29 @@ describe('image assets', () => {
     it('omits Assets section when no images', () => {
       const prompt = buildPrompt(sampleNode);
       expect(prompt).not.toContain('## Assets');
+    });
+
+    it('reflects filename overrides in Assets section', () => {
+      const prompt = buildPrompt(nodeWithImage, { imageNameOverrides: { '2': 'hero_bg' } });
+      expect(prompt).toContain('`hero_bg.png`');
+      expect(prompt).not.toContain('`Hero_Section_Hero_Background.png`');
+    });
+
+    it('includes merged composite line when merged option provided', () => {
+      const prompt = buildPrompt(nodeWithImage, {
+        merged: { name: 'hero_frame', width: 1200, height: 800 },
+      });
+      expect(prompt).toContain('`hero_frame.png` → whole composite (1200×800)');
+      // Individual image lines still present
+      expect(prompt).toContain('`Hero_Section_Hero_Background.png`');
+    });
+
+    it('adds Assets section for merged even when per-image list is empty', () => {
+      const prompt = buildPrompt(sampleNode, {
+        merged: { name: 'frame', width: 100, height: 100 },
+      });
+      expect(prompt).toContain('## Assets');
+      expect(prompt).toContain('`frame.png` → whole composite (100×100)');
     });
   });
 });

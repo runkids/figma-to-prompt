@@ -298,6 +298,82 @@ body {
   box-shadow: 3px 3px 0 var(--accent);
 }
 
+/* ── Image Names ──────────────────────────────────────── */
+.names-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.names-toggle {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-fg);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  list-style: none;
+  user-select: none;
+}
+
+.names-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.names-toggle::before {
+  content: '▸ ';
+}
+
+.names-row[open] .names-toggle::before {
+  content: '▾ ';
+}
+
+.names-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 4px;
+}
+
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.name-row-label {
+  color: var(--muted-fg);
+  flex-shrink: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name-input {
+  flex: 1;
+  padding: 3px 6px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--fg);
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  min-width: 0;
+}
+
+.name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 2px 2px 0 var(--accent);
+}
+
+.name-ext {
+  color: var(--muted-fg);
+  flex-shrink: 0;
+}
+
 /* ── Status Bar ───────────────────────────────────────── */
 .status-bar {
   display: flex;

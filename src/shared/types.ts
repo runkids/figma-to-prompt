@@ -125,6 +125,10 @@ export type SandboxMessage = ExportResultMessage | SelectionEmptyMessage | Image
 /** Export mode: per-image splits each image-fill node; merged renders the whole selection as one composite image */
 export type ExportMode = 'per-image' | 'merged';
 
+/** User-supplied filename overrides. Key is node id, value is filename without extension.
+ *  Empty string means "fall back to auto-generated name". */
+export type ImageNameOverrides = Record<string, string>;
+
 /** Messages sent from UI → Sandbox */
 export interface ExportImagesMessage {
   type: 'export-images';

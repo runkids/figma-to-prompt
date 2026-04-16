@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION } from '../shared/types';
-import type { SandboxMessage, UISerializedNode, UIMessage, ExportMode } from '../shared/types';
+import type { SandboxMessage, UISerializedNode, UIMessage, ExportMode, ImageNameOverrides } from '../shared/types';
 import { buildPrompt, collectImageAssets } from './prompt';
 
 declare const __APP_VERSION__: string;
@@ -17,6 +17,8 @@ let currentMergedImage: string | null = null;
 let currentScale = 0; // 0 = original quality via getImageByHash
 let currentFormat: 'PNG' | 'JPG' | 'SVG' = 'PNG';
 let currentMode: ExportMode = 'per-image';
+let imageNameOverrides: ImageNameOverrides = {};
+let mergedImageName = ''; // filename without extension; empty = fall back to frame name
 
 // DOM elements
 const tabJson = document.getElementById('tab-json')!;
@@ -37,9 +39,104 @@ const statusDot = document.getElementById('status-dot')!;
 const emptyJson = document.getElementById('empty-json')!;
 const emptyPrompt = document.getElementById('empty-prompt')!;
 const exportRow = document.getElementById('export-row')!;
+const namesRow = document.getElementById('names-row')!;
+const namesList = document.getElementById('names-list')!;
 
 function sendToSandbox(msg: UIMessage): void {
   parent.postMessage({ pluginMessage: msg }, '*');
+}
+
+/** Match the character class used by auto-naming in prompt.ts */
+function sanitizeName(s: string): string {
+  return s.replace(/[^a-zA-Z0-9-_]/g, '_');
+}
+
+/** Extension to use for per-image downloads based on current scale/format */
+function perImageExt(): string {
+  // SVG for IMAGE fills falls back to PNG (Figma SVG export bug); scale=0 is PNG too
+  return currentScale === 0 || currentFormat === 'SVG' ? 'png' : currentFormat.toLowerCase();
+}
+
+/** Rebuild the prompt text from currentData + overrides and refresh the DOM. */
+function rebuildPromptText(): void {
+  if (!currentData) return;
+  const merged = currentMode === 'merged' && currentData.layout
+    ? {
+        name: mergedImageName.trim() || sanitizeName(currentData.name),
+        width: Math.round(currentData.layout.width),
+        height: Math.round(currentData.layout.height),
+      }
+    : undefined;
+  currentPromptText = buildPrompt(currentData, { imageNameOverrides, merged });
+  if (currentTab === 'prompt') promptOutput.textContent = currentPromptText;
+}
+
+let nameInputDebounce: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleRebuild(): void {
+  if (nameInputDebounce) clearTimeout(nameInputDebounce);
+  nameInputDebounce = setTimeout(rebuildPromptText, 80);
+}
+
+/** Build one input row (label + input + `.png`/ext hint) */
+function makeNameRow(labelText: string, placeholder: string, value: string, onChange: (v: string) => void): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'name-row';
+
+  const label = document.createElement('span');
+  label.className = 'name-row-label';
+  label.title = labelText;
+  label.textContent = labelText;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'name-input';
+  input.placeholder = placeholder;
+  input.value = value;
+  input.spellcheck = false;
+  input.addEventListener('input', () => {
+    const sanitized = sanitizeName(input.value);
+    if (sanitized !== input.value) input.value = sanitized;
+    onChange(sanitized);
+    scheduleRebuild();
+  });
+
+  const ext = document.createElement('span');
+  ext.className = 'name-ext';
+  ext.textContent = currentMode === 'merged'
+    ? `.${currentFormat === 'JPG' ? 'jpg' : currentFormat === 'SVG' ? 'svg' : 'png'}`
+    : `.${perImageExt()}`;
+
+  row.append(label, input, ext);
+  return row;
+}
+
+/** (Re)populate the names list for the current selection + mode */
+function renderNameInputs(): void {
+  namesList.replaceChildren();
+  if (!currentData) return;
+
+  if (currentMode === 'merged') {
+    const placeholder = sanitizeName(currentData.name);
+    namesList.append(
+      makeNameRow('(composite)', placeholder, mergedImageName, (v) => {
+        mergedImageName = v;
+      }),
+    );
+    return;
+  }
+
+  // Per-image: one row per image-fill node (auto-name used as placeholder)
+  const assets = collectImageAssets(currentData);
+  for (const a of assets) {
+    const autoName = a.fileName.replace(/\.png$/, '');
+    namesList.append(
+      makeNameRow(a.nodeName, autoName, imageNameOverrides[a.nodeId] ?? '', (v) => {
+        if (v === '') delete imageNameOverrides[a.nodeId];
+        else imageNameOverrides[a.nodeId] = v;
+      }),
+    );
+  }
 }
 
 // Status dot color helper
@@ -83,16 +180,20 @@ function reconcileScaleForMode(): void {
 selectMode.addEventListener('change', () => {
   currentMode = selectMode.value as ExportMode;
   reconcileScaleForMode();
+  renderNameInputs();
+  rebuildPromptText();
   if (currentData) requestImageExport();
 });
 
 selectScale.addEventListener('change', () => {
   currentScale = Number(selectScale.value);
+  renderNameInputs(); // ext label depends on scale/format
   if (currentData) requestImageExport();
 });
 
 selectFormat.addEventListener('change', () => {
   currentFormat = selectFormat.value as 'PNG' | 'JPG' | 'SVG';
+  renderNameInputs();
   if (currentData) requestImageExport();
 });
 
@@ -244,18 +345,17 @@ btnDownloadImages.addEventListener('click', async () => {
   // Merged mode: single composite image, no zip
   if (currentMode === 'merged') {
     if (!currentMergedImage) return;
-    const safeName = currentData.name.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const base = mergedImageName.trim() || sanitizeName(currentData.name);
     const ext = currentFormat === 'JPG' ? 'jpg' : currentFormat === 'SVG' ? 'svg' : 'png';
-    downloadBlob(`${safeName}.${ext}`, dataUrlToBlob(currentMergedImage));
+    downloadBlob(`${base}.${ext}`, dataUrlToBlob(currentMergedImage));
     showImageDownloadFeedback(1);
     return;
   }
 
   if (Object.keys(currentImages).length === 0) return;
-  const assets = collectImageAssets(currentData);
-  // SVG for IMAGE fills falls back to original PNG (Figma SVG export bug);
-  // Original mode (scale=0) also produces PNG
-  const ext = currentScale === 0 || currentFormat === 'SVG' ? 'png' : currentFormat.toLowerCase();
+  // Apply user overrides + collision-safe auto naming
+  const assets = collectImageAssets(currentData, imageNameOverrides);
+  const ext = perImageExt();
   const files: { name: string; data: Uint8Array }[] = [];
 
   for (const asset of assets) {
@@ -377,6 +477,10 @@ window.onmessage = (event: MessageEvent) => {
     currentPromptText = '';
     currentImages = {};
     currentMergedImage = null;
+    imageNameOverrides = {};
+    mergedImageName = '';
+    namesList.replaceChildren();
+    namesRow.classList.add('hidden');
     // Show empty states, hide content
     jsonOutput.textContent = '';
     jsonOutput.classList.add('hidden');
@@ -399,9 +503,20 @@ window.onmessage = (event: MessageEvent) => {
   if (msg.type === 'export-result') {
     currentData = msg.data;
     currentJson = JSON.stringify(msg.data, null, 2);
-    currentPromptText = buildPrompt(msg.data);
     currentImages = {}; // reset — images arrive later via image-data
     currentMergedImage = null;
+    // New selection → clear per-node overrides (nodeIds don't carry across frames)
+    imageNameOverrides = {};
+    mergedImageName = '';
+    // Build prompt with current mode (so merged composite line shows up immediately in merged mode)
+    const mergedInit = currentMode === 'merged' && msg.data.layout
+      ? {
+          name: sanitizeName(msg.data.name),
+          width: Math.round(msg.data.layout.width),
+          height: Math.round(msg.data.layout.height),
+        }
+      : undefined;
+    currentPromptText = buildPrompt(msg.data, { imageNameOverrides, merged: mergedInit });
 
     // Hide empty states, show content
     emptyJson.classList.add('hidden');
@@ -417,8 +532,10 @@ window.onmessage = (event: MessageEvent) => {
     btnDownloadImages.disabled = true; // enabled when images arrive
 
     const imageCount = currentData ? collectImageAssets(currentData).length : 0;
-    // Progressive disclosure: show export options only when images exist
+    // Progressive disclosure: show export options + rename affordance only when images exist
     exportRow.classList.toggle('hidden', imageCount === 0);
+    namesRow.classList.toggle('hidden', imageCount === 0);
+    if (imageCount > 0) renderNameInputs();
 
     let status = `Selected: ${msg.data.name} (${msg.data.type}) — ${msg.meta.nodeCount} nodes`;
     if (imageCount > 0) {
