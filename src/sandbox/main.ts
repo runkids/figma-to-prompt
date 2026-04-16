@@ -101,13 +101,13 @@ async function exportImages(
 
   const images: Record<string, string> = {};
 
-  // Figma's SVG export has a known bug with IMAGE fills — the <image> transform
-  // is miscalculated, causing overflow/sizing issues. For nodes with IMAGE fills,
-  // always use getImageByHash (original raster) regardless of format selection.
-  // SVG format only works correctly for pure vector nodes.
-  const useOriginal = scale === 0 || format === 'SVG';
-
-  if (useOriginal) {
+  // scale=0 ("Original") means: bypass exportAsync and return the uploaded raster
+  // via getImageByHash — this is always PNG by definition. The UI reconciles JPG/SVG
+  // away from scale=0 so this branch only runs for PNG+Original.
+  // Note: SVG export for nodes with IMAGE fills may have a <image> transform bug
+  // upstream in Figma; we honor the user's format choice rather than silently
+  // downgrading to PNG.
+  if (scale === 0) {
     // Original quality: getImageByHash returns the uploaded raster at full resolution
     for (const img of imageNodes) {
       if (exportId !== currentExportId) return;
@@ -121,7 +121,7 @@ async function exportImages(
     }
   } else {
     // Render at scale: exportAsync produces the node as-rendered at chosen size
-    const mime = format === 'JPG' ? 'image/jpeg' : 'image/png';
+    const mime = format === 'JPG' ? 'image/jpeg' : format === 'SVG' ? 'image/svg+xml' : 'image/png';
     for (const img of imageNodes) {
       if (exportId !== currentExportId) return;
       try {
@@ -129,7 +129,7 @@ async function exportImages(
         if (!sceneNode || !('exportAsync' in sceneNode)) continue;
         const exportable = sceneNode as SceneNode;
         const bytes = await exportable.exportAsync({
-          format: format as 'PNG' | 'JPG',
+          format,
           constraint: { type: 'SCALE' as const, value: scale },
         });
         images[img.id] = `data:${mime};base64,${uint8ArrayToBase64(bytes)}`;

@@ -51,10 +51,11 @@ function sanitizeName(s: string): string {
   return s.replace(/[^a-zA-Z0-9-_]/g, '_');
 }
 
-/** Extension to use for per-image downloads based on current scale/format */
+/** Extension to use for per-image downloads based on current scale/format.
+ *  scale=0 uses getImageByHash → always PNG regardless of format selection.
+ *  Any other scale honors the user's format choice. */
 function perImageExt(): string {
-  // SVG for IMAGE fills falls back to PNG (Figma SVG export bug); scale=0 is PNG too
-  return currentScale === 0 || currentFormat === 'SVG' ? 'png' : currentFormat.toLowerCase();
+  return currentScale === 0 ? 'png' : currentFormat.toLowerCase();
 }
 
 /** Rebuild the prompt text from currentData + overrides and refresh the DOM. */
@@ -177,10 +178,10 @@ function reconcileScaleForMode(): void {
   }
 }
 
-/** Scale=0 (Original) always returns PNG via getImageByHash — JPG cannot be honored.
- *  If the user picks JPG, auto-bump to 1x so the format choice actually applies. */
+/** Scale=0 (Original) always returns PNG via getImageByHash — JPG/SVG cannot be honored.
+ *  If the user picks a non-PNG format, auto-bump to 1x so the format choice actually applies. */
 function reconcileScaleForFormat(): void {
-  if (currentScale === 0 && currentFormat === 'JPG') {
+  if (currentScale === 0 && currentFormat !== 'PNG') {
     currentScale = 1;
     selectScale.value = '1';
   }
