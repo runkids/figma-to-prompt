@@ -285,24 +285,11 @@ body {
   box-shadow: 3px 3px 0 var(--border);
 }
 
-.option-row {
+.option-stack {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
-}
-
-/* Combined Size + Format row: two chip-groups share space by chip count
-   so chip widths stay similar across both groups. */
-.option-row-combined #group-scale { flex: 5; }
-.option-row-combined #group-format { flex: 3; }
-
-.chip-divider {
-  width: 2px;
-  height: 18px;
-  background: var(--border);
-  flex-shrink: 0;
-  border-radius: 1px;
 }
 
 /* ── Quality Row ──────────────────────────────────────── */

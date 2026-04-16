@@ -2,30 +2,33 @@ import { collectImageAssets } from './prompt';
 import type { ExportMode, ImageFormat, ImageNameOverrides, UISerializedNode } from '../shared/types';
 
 export type Tab = 'json' | 'prompt';
+type LossyImageFormat = Extract<ImageFormat, 'JPG' | 'WEBP' | 'AVIF'>;
 
 /** Default canvas.toBlob quality. 0.92 is the browser's native default and
  *  keeps JPG output roughly on par with Figma's own encoder; users can slide
  *  down toward 0.3 for smaller files. */
 export const DEFAULT_QUALITY = 0.92;
+export const AVIF_DEFAULT_QUALITY = 0.8;
 
 export interface State {
   data: UISerializedNode | null;
   tab: Tab;
-  /** Final, display-ready images (possibly transcoded). What PreviewArea and
-   *  the downloader actually consume. */
+  /** Preview images mirrored from the sandbox source. Download encoding is
+   *  deferred until the user clicks Download so quality changes stay cheap. */
   images: Record<string, string>;
   mergedImage: string | null;
   /** Raw sandbox output kept around so quality / format tweaks can re-transcode
-   *  without a sandbox round-trip. For PNG / SVG targets this equals `images` /
-   *  `mergedImage`; for lossy targets it holds the PNG source the transcode
-   *  pipeline reads from. */
+   *  without a sandbox round-trip. App.tsx mirrors this into preview state;
+   *  ExportCard reads it again for download-time encoding. */
   rawImages: Record<string, string>;
   rawMerged: string | null;
   scale: number; // 0 = original (getImageByHash), 1..4 = px multiplier
   format: ImageFormat;
-  /** canvas.toBlob quality for lossy formats (JPG / WEBP / AVIF). Ignored for
-   *  PNG and SVG. Kept in state across format swaps so the slider sticks. */
+  /** Active canvas.toBlob quality for lossy formats. Ignored for PNG and SVG. */
   quality: number;
+  /** Per-format quality memory so AVIF can default lower without overwriting
+   *  a user's JPG/WebP preference or a custom AVIF value. */
+  qualityByFormat: Partial<Record<LossyImageFormat, number>>;
   mode: ExportMode;
   nameOverrides: ImageNameOverrides;
   mergedImageName: string;
@@ -45,6 +48,7 @@ export const initialState: State = {
   scale: 0,
   format: 'PNG',
   quality: DEFAULT_QUALITY,
+  qualityByFormat: {},
   mode: 'per-image',
   nameOverrides: {},
   mergedImageName: '',
@@ -56,10 +60,10 @@ export const initialState: State = {
 export type Action =
   | { type: 'SELECTION_EMPTY' }
   | { type: 'SELECTION_RECEIVED'; data: UISerializedNode }
-  /** Sandbox delivered fresh PNG / SVG source data. Transcode effect will
-   *  consume this and produce IMAGES_RECEIVED with user-format output. */
+  /** Sandbox delivered fresh PNG / SVG source data. App.tsx mirrors this into
+   *  preview state; download-time encoding still reads the raw copy. */
   | { type: 'RAW_IMAGES_RECEIVED'; images: Record<string, string>; merged?: string | null }
-  /** Final transcoded (or passthrough) images ready for preview / download. */
+  /** Preview images ready for display. */
   | { type: 'IMAGES_RECEIVED'; images: Record<string, string>; merged?: string | null }
   | { type: 'TAB_CHANGED'; tab: Tab }
   | { type: 'MODE_CHANGED'; mode: ExportMode }
@@ -88,6 +92,23 @@ function needsSandboxRefetch(prev: ImageFormat, next: ImageFormat): boolean {
   return (prev === 'SVG') !== (next === 'SVG');
 }
 
+function isLossyFormat(format: ImageFormat): format is LossyImageFormat {
+  return format === 'JPG' || format === 'WEBP' || format === 'AVIF';
+}
+
+function defaultQualityForFormat(format: ImageFormat): number {
+  return format === 'AVIF' ? AVIF_DEFAULT_QUALITY : DEFAULT_QUALITY;
+}
+
+function qualityForFormat(
+  format: ImageFormat,
+  qualityByFormat: Partial<Record<LossyImageFormat, number>>,
+): number {
+  return isLossyFormat(format)
+    ? qualityByFormat[format] ?? defaultQualityForFormat(format)
+    : DEFAULT_QUALITY;
+}
+
 function clampQuality(v: number): number {
   if (!Number.isFinite(v)) return DEFAULT_QUALITY;
   if (v < 0.1) return 0.1;
@@ -104,6 +125,8 @@ export function reducer(state: State, action: Action): State {
         tab: state.tab,
         scale: state.scale,
         format: state.format,
+        quality: state.quality,
+        qualityByFormat: state.qualityByFormat,
         mode: state.mode,
         protocolMismatch: state.protocolMismatch,
         updateAvailable: state.updateAvailable,
@@ -137,9 +160,8 @@ export function reducer(state: State, action: Action): State {
     }
 
     case 'RAW_IMAGES_RECEIVED':
-      // Sandbox delivered the Figma-native source. The transcode effect in
-      // App.tsx watches rawImages / rawMerged / format / quality and writes
-      // the final display-ready output back via IMAGES_RECEIVED.
+      // Sandbox delivered the Figma-native source. App.tsx mirrors this into
+      // display state; ExportCard handles expensive lossy encoding on Download.
       return { ...state, rawImages: action.images, rawMerged: action.merged ?? null };
 
     case 'IMAGES_RECEIVED':
@@ -176,23 +198,28 @@ export function reducer(state: State, action: Action): State {
       const format = action.format;
       const scale = reconcileScale(state.scale, state.mode, format);
       // Raster → raster swaps (PNG ↔ JPG ↔ WEBP ↔ AVIF) reuse the existing
-      // PNG raw data and only require a client-side re-transcode. The
-      // transcode effect in App.tsx is driven by `format`, so merely updating
-      // state here is enough — no sandbox round-trip.
+      // PNG source. The selected format only affects filenames and download-time
+      // encoding, so no sandbox round-trip is needed.
       const refetch = needsSandboxRefetch(state.format, format);
       return {
         ...state,
         format,
         scale,
+        quality: qualityForFormat(format, state.qualityByFormat),
         exportRequestId:
           refetch && state.data ? state.exportRequestId + 1 : state.exportRequestId,
       };
     }
 
-    case 'QUALITY_CHANGED':
-      // Quality only affects the client-side transcode step, so no sandbox
-      // re-export — the effect picks up the new value from state and reruns.
-      return { ...state, quality: clampQuality(action.value) };
+    case 'QUALITY_CHANGED': {
+      // Quality only affects download-time encoding, so no sandbox re-export
+      // and no preview transcode are needed.
+      const quality = clampQuality(action.value);
+      const qualityByFormat = isLossyFormat(state.format)
+        ? { ...state.qualityByFormat, [state.format]: quality }
+        : state.qualityByFormat;
+      return { ...state, quality, qualityByFormat };
+    }
 
     case 'NAME_OVERRIDE_CHANGED': {
       const overrides = { ...state.nameOverrides };

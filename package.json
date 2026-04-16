@@ -31,6 +31,7 @@
     "vitest": "^3.1.0"
   },
   "dependencies": {
+    "@jsquash/avif": "1.1.2-single-thread-only",
     "preact": "^10.29.1"
   }
 }

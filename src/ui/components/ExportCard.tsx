@@ -5,6 +5,7 @@ import type { ExportMode, ImageFormat } from '../../shared/types';
 import { type ImageAsset, collectImageAssets, sanitizeFileName } from '../prompt';
 import { mergedExt, perImageExt, useDebouncedCallback, useFeedback } from '../utils';
 import { createZip, dataUrlToBlob, downloadBlob } from '../download';
+import { transcodeDataUrl } from '../transcode';
 import {
   type FsaDirectoryHandle,
   ensurePermission,
@@ -33,9 +34,8 @@ const FORMAT_OPTIONS: { value: ImageFormat; label: string }[] = [
   { value: 'SVG', label: 'SVG' },
 ];
 
-/** Formats that go through canvas.toBlob (have a `quality` knob). Matches the
- *  `isLossy` predicate in transcode.ts — duplicated here to keep the component
- *  self-contained for rendering decisions. */
+/** Formats with a download-time quality knob. Matches the `isLossy` predicate
+ *  in transcode.ts — duplicated here to keep rendering decisions local. */
 const LOSSY_FORMATS = new Set<ImageFormat>(['JPG', 'WEBP', 'AVIF']);
 
 const SCALE_OPTIONS = [
@@ -264,7 +264,6 @@ function RenamesList({ state, assets, dispatch }: { state: State; assets: ImageA
     );
   }
 
-  const ext = perImageExt(state.scale, state.format);
   return (
     <>
       {assets.map((a) => (
@@ -273,7 +272,7 @@ function RenamesList({ state, assets, dispatch }: { state: State; assets: ImageA
           label={a.nodeName}
           placeholder={a.fileName.replace(/\.png$/, '')}
           initialValue={state.nameOverrides[a.nodeId] ?? ''}
-          ext={ext}
+          ext={perImageExt(state.scale, state.format)}
           thumbUrl={state.images[a.nodeId]}
           onCommit={(v) => dispatch({ type: 'NAME_OVERRIDE_CHANGED', id: a.nodeId, value: v })}
         />
@@ -331,7 +330,9 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
   // several seconds on big exports. Users perceived this as a hang.
   const [saving, setSaving] = useState(false);
 
-  const loadedCount = state.mergedImage ? 1 : Object.keys(state.images).length;
+  const loadedCount = state.mode === 'merged'
+    ? (state.mergedImage ? 1 : 0)
+    : Object.keys(state.images).length;
   const disabled = !state.data || loadedCount === 0 || saving;
 
   async function handleClick() {
@@ -352,22 +353,26 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
       let feedbackCount = 0;
 
       if (state.mode === 'merged') {
-        if (!state.mergedImage) return;
+        const source = state.rawMerged ?? state.mergedImage;
+        if (!source) return;
         const base = state.mergedImageName.trim() || sanitizeFileName(state.data.name);
+        const dataUrl = await transcodeDataUrl(source, state.format, state.quality);
+        const blob = await dataUrlToBlob(dataUrl);
         outputs.push({
-          name: `${base}.${mergedExt(state.format)}`,
-          blob: await dataUrlToBlob(state.mergedImage),
+          name: `${base}.${mergedExt(state.format, dataUrl)}`,
+          blob,
         });
         feedbackCount = 1;
       } else {
         if (Object.keys(state.images).length === 0) return;
         const namedAssets = collectImageAssets(state.data, state.nameOverrides);
-        const ext = perImageExt(state.scale, state.format);
         const perFile: { name: string; data: Uint8Array }[] = [];
 
         for (const asset of namedAssets) {
-          const dataUrl = state.images[asset.nodeId];
-          if (!dataUrl) continue;
+          const source = state.rawImages[asset.nodeId] ?? state.images[asset.nodeId];
+          if (!source) continue;
+          const dataUrl = await transcodeDataUrl(source, state.format, state.quality);
+          const ext = perImageExt(state.scale, state.format, dataUrl);
           const blob = await dataUrlToBlob(dataUrl);
           const buffer = await blob.arrayBuffer();
           perFile.push({
@@ -489,7 +494,7 @@ export function ExportCard({ state, dispatch }: Props) {
         onChange={(v) => dispatch({ type: 'MODE_CHANGED', mode: v })}
       />
 
-      <div class="option-row option-row-combined">
+      <div class="option-stack">
         <ButtonGroup
           ariaLabel="Size"
           variant="chip"
@@ -497,7 +502,6 @@ export function ExportCard({ state, dispatch }: Props) {
           value={String(state.scale)}
           onChange={(v) => dispatch({ type: 'SCALE_CHANGED', scale: Number(v) })}
         />
-        <span class="chip-divider" aria-hidden="true" />
         <ButtonGroup
           ariaLabel="Format"
           variant="chip"

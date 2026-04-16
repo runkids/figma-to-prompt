@@ -35,17 +35,16 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 /** scale=0 pulls the original PNG raster via getImageByHash, then we transcode
- *  client-side when the user picks a lossy target. The file extension always
- *  reflects the user's chosen format — the raster source is an implementation
- *  detail of the pipeline. SVG never enters this path (its own reconcile
- *  rule bumps scale away from 0). */
-export function perImageExt(_scale: number, format: ImageFormat): string {
-  return formatExt(format);
+ *  client-side when the user picks a lossy target. When a browser cannot encode
+ *  the requested MIME (notably AVIF), canvas falls back to PNG; in that case the
+ *  extension must follow the actual data URL so we never save fake .avif files. */
+export function perImageExt(_scale: number, format: ImageFormat, dataUrl?: string | null): string {
+  return dataUrlExt(dataUrl) ?? formatExt(format);
 }
 
-/** ext used in merged-mode download (no `getImageByHash` path → format always honored) */
-export function mergedExt(format: ImageFormat): string {
-  return formatExt(format);
+/** Extension used in merged-mode download, matching the actual encoded data. */
+export function mergedExt(format: ImageFormat, dataUrl?: string | null): string {
+  return dataUrlExt(dataUrl) ?? formatExt(format);
 }
 
 /** Lower-cased file extension (no dot) for an output format. */
@@ -56,6 +55,18 @@ function formatExt(format: ImageFormat): string {
     case 'WEBP': return 'webp';
     case 'AVIF': return 'avif';
     default: return 'png';
+  }
+}
+
+function dataUrlExt(dataUrl?: string | null): string | null {
+  const mime = /^data:([^;,]+)/.exec(dataUrl ?? '')?.[1]?.toLowerCase();
+  switch (mime) {
+    case 'image/jpeg': return 'jpg';
+    case 'image/png': return 'png';
+    case 'image/svg+xml': return 'svg';
+    case 'image/webp': return 'webp';
+    case 'image/avif': return 'avif';
+    default: return null;
   }
 }
 

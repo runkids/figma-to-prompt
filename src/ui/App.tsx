@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer } from 'preact/hooks';
 import { initialState, reducer } from './state';
 import { buildPrompt, sanitizeFileName } from './prompt';
-import { isLossy, toSandboxFormat, transcodeDataUrl } from './transcode';
+import { toSandboxFormat } from './transcode';
 import { PROTOCOL_VERSION } from '../shared/types';
 import type { ImageDataMessage, SandboxMessage, UIMessage } from '../shared/types';
 import { Header } from './components/Header';
@@ -102,9 +102,9 @@ export function App() {
       } else if (msg.type === 'export-result') {
         dispatch({ type: 'SELECTION_RECEIVED', data: msg.data });
       } else if (msg.type === 'image-data') {
-        // Sandbox delivers *source* pixels (always PNG / SVG). The transcode
-        // effect below reacts to rawImages / rawMerged / format / quality and
-        // produces the user-facing `images` / `mergedImage`.
+        // Sandbox delivers preview/source pixels (always PNG / SVG). Download
+        // encoding happens lazily in ExportCard so quality slider drags never
+        // block preview rendering.
         if (msg.mergedTiles) {
           // Async composite — publish raw without the merged yet so the status
           // bar can show "loading", then fill in once the canvas finishes.
@@ -125,11 +125,10 @@ export function App() {
     };
   }, []);
 
-  // Re-export images whenever reducer bumps the request id (mode/scale change,
-  // or selection received in merged mode, or SVG ↔ raster switch). raster ↔
-  // raster swaps do NOT bump the id — they only need a client-side re-transcode,
-  // which the effect below handles. exportRequestId === 0 means sandbox already
-  // auto-exported per-image on selection, no UI request needed.
+  // Re-export source pixels whenever reducer bumps the request id (mode/scale
+  // change, or selection received in merged mode, or SVG ↔ raster switch).
+  // Raster output-format swaps reuse the existing PNG preview/source and defer
+  // actual JPG/WebP/AVIF encoding until Download.
   useEffect(() => {
     if (state.exportRequestId === 0 || !state.data) return;
     sendToSandbox({
@@ -140,12 +139,9 @@ export function App() {
     });
   }, [state.exportRequestId]);
 
-  // Transcode pipeline: react to fresh raw data, format swaps, or quality
-  // changes by producing the user-facing `images` / `mergedImage`. For
-  // passthrough formats (PNG / SVG) we just mirror raw into final in the same
-  // tick; for lossy formats we decode + canvas.toBlob and publish when done.
-  // A generation token guards against races: rapid slider drags only let the
-  // latest transcode win, and a selection change aborts mid-flight work.
+  // Preview pipeline: mirror sandbox source pixels into the UI preview. This
+  // intentionally does not depend on format or quality; lossy encoding can be
+  // expensive (especially AVIF WASM) and only matters for the downloaded file.
   useEffect(() => {
     const hasRaw =
       Object.keys(state.rawImages).length > 0 || state.rawMerged != null;
@@ -156,34 +152,12 @@ export function App() {
       return;
     }
 
-    if (!isLossy(state.format)) {
-      // PNG / SVG: no transcode. Reference-sharing is fine — the strings are
-      // immutable data URLs.
-      dispatch({
-        type: 'IMAGES_RECEIVED',
-        images: state.rawImages,
-        merged: state.rawMerged,
-      });
-      return;
-    }
-
-    let cancelled = false;
-    (async () => {
-      const next: Record<string, string> = {};
-      for (const [id, url] of Object.entries(state.rawImages)) {
-        if (cancelled) return;
-        next[id] = await transcodeDataUrl(url, state.format, state.quality);
-      }
-      const mergedOut = state.rawMerged
-        ? await transcodeDataUrl(state.rawMerged, state.format, state.quality)
-        : null;
-      if (cancelled) return;
-      dispatch({ type: 'IMAGES_RECEIVED', images: next, merged: mergedOut });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [state.rawImages, state.rawMerged, state.format, state.quality]);
+    dispatch({
+      type: 'IMAGES_RECEIVED',
+      images: state.rawImages,
+      merged: state.rawMerged,
+    });
+  }, [state.rawImages, state.rawMerged]);
 
   // Best-effort GitHub release check; fully silent on failure.
   useEffect(() => {
