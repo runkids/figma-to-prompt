@@ -118,6 +118,16 @@ export interface ImageDataMessage {
   images: Record<string, string>;
   /** Merged composite image (whole selected node rendered as one image). Only set in merged mode. */
   merged?: string;
+  /** Multi-selection merged mode: per-node tiles the UI will composite into a single image.
+   *  Sandbox can't render a multi-node selection as one image (no canvas), so it emits
+   *  individually exported tiles plus absolute bbox metadata; the UI side assembles. */
+  mergedTiles?: {
+    tiles: Array<{ dataUrl: string; x: number; y: number; width: number; height: number }>;
+    width: number;
+    height: number;
+    format: ImageFormat;
+    scale: number;
+  };
 }
 
 export type SandboxMessage = ExportResultMessage | SelectionEmptyMessage | ImageDataMessage;
