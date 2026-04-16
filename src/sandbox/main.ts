@@ -1,5 +1,6 @@
 import { extractNode } from './extractor';
 import { normalizeNode } from './normalizer';
+import { PROTOCOL_VERSION } from '../shared/types';
 import type { SandboxMessage, UISerializedNode, UIMessage } from '../shared/types';
 
 figma.showUI(__html__, { width: 480, height: 560 });
@@ -134,6 +135,7 @@ function handleSelection(): void {
 
   const msg: SandboxMessage = {
     type: 'export-result',
+    protocolVersion: PROTOCOL_VERSION,
     data: normalized,
     meta: { nodeCount: countNodes(normalized) },
   };

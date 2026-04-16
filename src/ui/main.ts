@@ -1,3 +1,4 @@
+import { PROTOCOL_VERSION } from '../shared/types';
 import type { SandboxMessage, UISerializedNode, UIMessage } from '../shared/types';
 import { buildPrompt, collectImageAssets } from './prompt';
 
@@ -314,10 +315,24 @@ async function checkForUpdate(): Promise<void> {
 
 checkForUpdate();
 
+// ── Protocol version check ──────────────────────────────
+const protocolBanner = document.getElementById('protocol-banner')!;
+let protocolChecked = false;
+
+function checkProtocol(msg: SandboxMessage): void {
+  if (protocolChecked) return;
+  if (msg.type === 'export-result' && msg.protocolVersion !== PROTOCOL_VERSION) {
+    protocolBanner.classList.remove('hidden');
+  }
+  protocolChecked = true;
+}
+
 // Handle messages from sandbox
 window.onmessage = (event: MessageEvent) => {
   const msg = event.data.pluginMessage as SandboxMessage;
   if (!msg) return;
+
+  checkProtocol(msg);
 
   if (msg.type === 'selection-empty') {
     currentData = null;

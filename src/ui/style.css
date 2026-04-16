@@ -330,6 +330,21 @@ body {
   font-family: ui-monospace, 'SF Mono', monospace;
 }
 
+/* ── Protocol Mismatch Banner ────────────────────────── */
+.protocol-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--secondary) 15%, var(--bg));
+  border-top: 2px solid var(--secondary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg);
+  flex-shrink: 0;
+}
+
 /* ── Update Banner ───────────────────────────────────── */
 .update-banner {
   display: flex;

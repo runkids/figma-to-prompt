@@ -18,7 +18,7 @@ A Figma plugin that extracts design data into structured JSON and AI-ready markd
 ### Option 1: Download from Releases (Recommended)
 
 1. Go to [Releases](https://github.com/runkids/figma-to-prompt/releases) and download the latest `.zip`
-2. Unzip — you'll get a folder with `manifest.json` and `dist/`
+2. Unzip — you'll get a folder with `manifest.json` and `dist/code.js`
 
 Then follow [Import into Figma](#import-into-figma).
 
@@ -28,7 +28,7 @@ Then follow [Import into Figma](#import-into-figma).
 git clone https://github.com/runkids/figma-to-prompt.git
 cd figma-to-prompt
 pnpm install
-pnpm build
+pnpm build:sandbox
 ```
 
 Then follow [Import into Figma](#import-into-figma).
@@ -43,6 +43,8 @@ Then follow [Import into Figma](#import-into-figma).
 
 3. Select the `manifest.json` from the unzipped folder (or cloned repo root)
 4. Done! **Figma to Prompt** appears under **Plugins** → **Development**
+
+> **Auto-update:** The plugin UI loads from GitHub Pages, so prompt generation and UI improvements update automatically. Only the sandbox code (`dist/code.js`) requires a new download when the extraction logic changes — the plugin will show a notification when this happens.
 
 #### Launch
 

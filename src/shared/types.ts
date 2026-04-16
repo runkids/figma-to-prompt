@@ -91,9 +91,17 @@ export interface UIStyle {
   variables?: Record<string, string>;
 }
 
+/**
+ * Protocol version for sandbox ↔ UI compatibility.
+ * Bump this when the message format changes in a breaking way.
+ * UI (remote) checks this against its own version and warns if mismatched.
+ */
+export const PROTOCOL_VERSION = 1;
+
 /** Message types for sandbox ↔ UI postMessage communication */
 export interface ExportResultMessage {
   type: 'export-result';
+  protocolVersion: number;
   data: UISerializedNode;
   meta: {
     nodeCount: number;
