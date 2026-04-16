@@ -177,6 +177,15 @@ function reconcileScaleForMode(): void {
   }
 }
 
+/** Scale=0 (Original) always returns PNG via getImageByHash — JPG cannot be honored.
+ *  If the user picks JPG, auto-bump to 1x so the format choice actually applies. */
+function reconcileScaleForFormat(): void {
+  if (currentScale === 0 && currentFormat === 'JPG') {
+    currentScale = 1;
+    selectScale.value = '1';
+  }
+}
+
 selectMode.addEventListener('change', () => {
   currentMode = selectMode.value as ExportMode;
   reconcileScaleForMode();
@@ -193,6 +202,7 @@ selectScale.addEventListener('change', () => {
 
 selectFormat.addEventListener('change', () => {
   currentFormat = selectFormat.value as 'PNG' | 'JPG' | 'SVG';
+  reconcileScaleForFormat();
   renderNameInputs();
   if (currentData) requestImageExport();
 });
