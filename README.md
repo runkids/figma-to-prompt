@@ -6,11 +6,13 @@ A Figma plugin that extracts design data into structured JSON and AI-ready markd
 
 ## Features
 
-- **JSON Export** — Get a full hierarchical JSON of any frame (layout, styles, typography, colors)
+- **JSON Export** — Full hierarchical JSON of any frame (layout, styles, typography, colors, design tokens)
 - **AI Prompt** — Auto-generates a framework-agnostic markdown prompt with embedded JSON spec
-- **Copy to Clipboard** — One-click copy of the current tab content (JSON or Prompt)
-- **Download** — Save as images
-- **Image Export** — PNG / JPG / SVG with 1x–4x scale options
+- **Multi-selection** — Select any number of nodes; all image fills are collected into one export
+- **Image Export** — PNG / JPG / SVG at 1×–4× scale, or Original (uploaded raster)
+- **Per-image or Merged** — Export each image fill separately, or composite the whole selection into one file
+- **Custom filenames** — Rename each image asset inline before download; names sync into the prompt
+- **Copy / Download** — One-click clipboard copy and zip download
 - **Real-time** — Updates instantly when you change your selection
 
 ## Install
@@ -82,24 +84,23 @@ The plugin generates a `UISerializedNode` tree:
 
 ```json
 {
-  "type": "FRAME",
+  "id": "1:23",
   "name": "Card",
+  "type": "FRAME",
   "layout": {
     "mode": "vertical",
+    "width": 320,
+    "height": 200,
     "gap": 12,
     "padding": { "top": 16, "right": 16, "bottom": 16, "left": 16 },
-    "mainAxisAlign": "min",
-    "crossAxisAlign": "min",
-    "primarySizing": "hug",
-    "counterSizing": "fixed"
+    "primaryAxisAlign": "min",
+    "counterAxisAlign": "min",
+    "sizing": { "horizontal": "hug", "vertical": "fixed" }
   },
   "style": {
-    "fills": ["#FFFFFF"],
-    "cornerRadius": 8,
-    "opacity": 1
+    "backgroundColor": "#FFFFFF",
+    "borderRadius": 8
   },
-  "width": 320,
-  "height": 200,
   "children": [...]
 }
 ```
@@ -156,30 +157,6 @@ git push origin main --tags
 ```
 
 GitHub Actions builds, packages the zip, and creates a Release with changelog.
-
-## Architecture
-
-```
-src/
-├── sandbox/          # Figma sandbox (no DOM access)
-│   ├── main.ts       # Selection listener → extract → normalize → postMessage
-│   ├── extractor.ts  # Walks SceneNode tree → UISerializedNode
-│   └── normalizer.ts # Normalizes values (hex colors, line-height, etc.)
-├── ui/               # iframe (Preact, no Figma API access)
-│   ├── ui.html       # Root mount point
-│   ├── index.tsx     # Preact entry — renders <App />
-│   ├── App.tsx       # Reducer + sandbox message bridge
-│   ├── state.ts      # Reducer + actions (single source of truth)
-│   ├── prompt.ts     # Generates the AI markdown prompt
-│   ├── utils.ts      # sanitizeName, copyToClipboard, ext helpers
-│   ├── download.ts   # Blob/ZIP download helpers
-│   ├── style.css     # Tailwind CSS
-│   └── components/   # Header, TabBar, CodePanel, ExportCard, …
-└── shared/
-    └── types.ts      # Shared type definitions
-```
-
-**Data flow:** Figma selection → `extractor` → `normalizer` → `postMessage` → UI render
 
 ## Tech Stack
 
