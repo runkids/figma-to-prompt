@@ -543,22 +543,36 @@ window.onmessage = (event: MessageEvent) => {
     btnDownloadImages.disabled = true; // enabled when images arrive
 
     const imageCount = currentData ? collectImageAssets(currentData).length : 0;
-    // Progressive disclosure: show export options + rename affordance only when images exist
-    exportRow.classList.toggle('hidden', imageCount === 0);
-    namesRow.classList.toggle('hidden', imageCount === 0);
-    if (imageCount > 0) renderNameInputs();
+    // Export-row is useful for any exportable selection (Merged mode works even
+    // without image fills — e.g. a pure-vector icon frame). Only hide on empty selection.
+    exportRow.classList.remove('hidden');
+
+    // Per-image mode requires image fills; disable it (and force Merged) when there are none.
+    const perImageOption = selectMode.querySelector('option[value="per-image"]') as HTMLOptionElement | null;
+    if (perImageOption) perImageOption.disabled = imageCount === 0;
+    if (imageCount === 0 && currentMode === 'per-image') {
+      currentMode = 'merged';
+      selectMode.value = 'merged';
+      reconcileScaleForMode();
+    }
+
+    // names-row: shown in merged mode always (composite input) or per-image with fills
+    const showNames = currentMode === 'merged' || imageCount > 0;
+    namesRow.classList.toggle('hidden', !showNames);
+    if (showNames) renderNameInputs();
 
     let status = `Selected: ${msg.data.name} (${msg.data.type}) — ${msg.meta.nodeCount} nodes`;
-    if (imageCount > 0) {
+    const willExport = currentMode === 'merged' || imageCount > 0;
+    if (willExport) {
       status += currentMode === 'merged' ? ' · merged (loading…)' : ` · ${imageCount} images (loading…)`;
     }
     statusText.textContent = status;
-    setStatusDot(imageCount > 0 ? 'loading' : 'active');
-    if (imageCount > 0) statusDot.classList.add('loading');
+    setStatusDot(willExport ? 'loading' : 'active');
+    if (willExport) statusDot.classList.add('loading');
 
-    // Sandbox auto-triggers per-image export on selection change. If the user
-    // previously chose merged mode, override with a merged request now.
-    if (imageCount > 0 && currentMode === 'merged') {
+    // Sandbox auto-triggers per-image export on selection change. Override with a merged
+    // request when we're in (or have been forced into) merged mode.
+    if (currentMode === 'merged') {
       requestImageExport();
     }
     return;
