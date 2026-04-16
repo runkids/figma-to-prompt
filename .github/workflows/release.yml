@@ -31,7 +31,7 @@ jobs:
 
       - run: pnpm test
 
-      - run: pnpm build:sandbox
+      - run: pnpm build
 
       - name: Generate changelog
         id: changelog
@@ -55,9 +55,9 @@ jobs:
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          mkdir -p figma-to-prompt/dist
+          mkdir -p figma-to-prompt
           cp manifest.json figma-to-prompt/
-          cp dist/code.js figma-to-prompt/dist/
+          cp -r dist figma-to-prompt/
           zip -r "figma-to-prompt-${TAG_NAME}.zip" figma-to-prompt/
 
       - name: Create Release
@@ -71,4 +71,3 @@ jobs:
 
             ---
             Download the zip, unzip, and import `manifest.json` into Figma Desktop.
-            The UI loads from GitHub Pages automatically — only `manifest.json` + `dist/code.js` are needed locally.
