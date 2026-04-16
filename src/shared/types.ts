@@ -114,17 +114,23 @@ export interface SelectionEmptyMessage {
 
 export interface ImageDataMessage {
   type: 'image-data';
-  /** Map of imageHash → base64 data URL (e.g. "data:image/png;base64,...") */
+  /** Map of nodeId → base64 data URL (e.g. "data:image/png;base64,..."). Empty in merged mode. */
   images: Record<string, string>;
+  /** Merged composite image (whole selected node rendered as one image). Only set in merged mode. */
+  merged?: string;
 }
 
 export type SandboxMessage = ExportResultMessage | SelectionEmptyMessage | ImageDataMessage;
+
+/** Export mode: per-image splits each image-fill node; merged renders the whole selection as one composite image */
+export type ExportMode = 'per-image' | 'merged';
 
 /** Messages sent from UI → Sandbox */
 export interface ExportImagesMessage {
   type: 'export-images';
   scale: number;
   format: 'PNG' | 'JPG' | 'SVG';
+  mode: ExportMode;
 }
 
 export type UIMessage = ExportImagesMessage;

@@ -96,6 +96,10 @@
       </div>
       <div id="export-row" class="export-row hidden">
         <span class="export-label">Export</span>
+        <select id="select-mode" class="geo-select" title="Per-image: each image fill as a separate file. Merged: whole selection rendered as one composite image (like Figma's native Export).">
+          <option value="per-image" selected>Per-image</option>
+          <option value="merged">Merged</option>
+        </select>
         <select id="select-scale" class="geo-select">
           <option value="0" selected>Original</option>
           <option value="1">1x</option>

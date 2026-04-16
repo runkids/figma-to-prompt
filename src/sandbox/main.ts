@@ -55,6 +55,41 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
   return result;
 }
 
+/** Render the whole selection as one composite image (same as Figma's native Export) */
+async function exportMerged(
+  rootId: string,
+  scale: number,
+  format: 'PNG' | 'JPG' | 'SVG',
+  exportId: number,
+): Promise<void> {
+  const sceneNode = figma.getNodeById(rootId);
+  if (!sceneNode || !('exportAsync' in sceneNode)) return;
+
+  // scale=0 is "original raster via getImageByHash" — meaningless for a merged render.
+  // Fall back to 1x so the merged mode always renders at a sensible size.
+  const effectiveScale = scale === 0 ? 1 : scale;
+
+  try {
+    const bytes = await (sceneNode as SceneNode).exportAsync({
+      format,
+      constraint: { type: 'SCALE' as const, value: effectiveScale },
+    });
+    if (exportId !== currentExportId) return;
+    const mime = format === 'JPG'
+      ? 'image/jpeg'
+      : format === 'SVG'
+        ? 'image/svg+xml'
+        : 'image/png';
+    const dataUrl = `data:${mime};base64,${uint8ArrayToBase64(bytes)}`;
+    const msg: SandboxMessage = { type: 'image-data', images: {}, merged: dataUrl };
+    figma.ui.postMessage(msg);
+  } catch {
+    if (exportId !== currentExportId) return;
+    const msg: SandboxMessage = { type: 'image-data', images: {} };
+    figma.ui.postMessage(msg);
+  }
+}
+
 async function exportImages(
   node: UISerializedNode,
   scale: number,
@@ -147,11 +182,15 @@ function handleSelection(): void {
 
 // ── Message Listeners ────────────────────────────────────
 
-// UI → Sandbox: handle scale/format change requests
+// UI → Sandbox: handle scale/format/mode change requests
 figma.ui.onmessage = (msg: UIMessage) => {
   if (msg.type === 'export-images' && lastNormalized) {
     const exportId = ++currentExportId;
-    exportImages(lastNormalized, msg.scale, msg.format, exportId);
+    if (msg.mode === 'merged') {
+      exportMerged(lastNormalized.id, msg.scale, msg.format, exportId);
+    } else {
+      exportImages(lastNormalized, msg.scale, msg.format, exportId);
+    }
   }
 };
 

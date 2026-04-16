@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION } from '../shared/types';
-import type { SandboxMessage, UISerializedNode, UIMessage } from '../shared/types';
+import type { SandboxMessage, UISerializedNode, UIMessage, ExportMode } from '../shared/types';
 import { buildPrompt, collectImageAssets } from './prompt';
 
 declare const __APP_VERSION__: string;
@@ -13,8 +13,10 @@ let currentJson = '';
 let currentPromptText = '';
 let currentTab: 'json' | 'prompt' = 'json';
 let currentImages: Record<string, string> = {};
+let currentMergedImage: string | null = null;
 let currentScale = 0; // 0 = original quality via getImageByHash
 let currentFormat: 'PNG' | 'JPG' | 'SVG' = 'PNG';
+let currentMode: ExportMode = 'per-image';
 
 // DOM elements
 const tabJson = document.getElementById('tab-json')!;
@@ -27,6 +29,7 @@ const btnCopyPrompt = document.getElementById('btn-copy-prompt') as HTMLButtonEl
 const btnDownloadJson = document.getElementById('btn-download-json') as HTMLButtonElement;
 const btnDownloadMd = document.getElementById('btn-download-md') as HTMLButtonElement;
 const btnDownloadImages = document.getElementById('btn-download-images') as HTMLButtonElement;
+const selectMode = document.getElementById('select-mode') as HTMLSelectElement;
 const selectScale = document.getElementById('select-scale') as HTMLSelectElement;
 const selectFormat = document.getElementById('select-format') as HTMLSelectElement;
 const statusText = document.getElementById('status-text')!;
@@ -52,23 +55,45 @@ function setStatusDot(state: 'idle' | 'active' | 'loading' | 'error'): void {
 
 function requestImageExport(): void {
   currentImages = {};
+  currentMergedImage = null;
   btnDownloadImages.disabled = true;
   statusText.textContent = (statusText.textContent ?? '')
     .replace(/\d+ images [✓]/, (m) => m.replace('✓', '(loading…)'))
+    .replace(/merged ✓/, 'merged (loading…)')
     .replace(/images failed/, 'images (loading…)');
   setStatusDot('loading');
   statusDot.classList.add('loading');
-  sendToSandbox({ type: 'export-images', scale: currentScale, format: currentFormat });
+  sendToSandbox({
+    type: 'export-images',
+    scale: currentScale,
+    format: currentFormat,
+    mode: currentMode,
+  });
 }
+
+/** Scale=0 means "original raster via getImageByHash" — only valid for per-image mode.
+ *  Auto-bump to 1x when switching to merged so the render has a sensible size. */
+function reconcileScaleForMode(): void {
+  if (currentMode === 'merged' && currentScale === 0) {
+    currentScale = 1;
+    selectScale.value = '1';
+  }
+}
+
+selectMode.addEventListener('change', () => {
+  currentMode = selectMode.value as ExportMode;
+  reconcileScaleForMode();
+  if (currentData) requestImageExport();
+});
 
 selectScale.addEventListener('change', () => {
   currentScale = Number(selectScale.value);
-  if (currentData && collectImageAssets(currentData).length > 0) requestImageExport();
+  if (currentData) requestImageExport();
 });
 
 selectFormat.addEventListener('change', () => {
   currentFormat = selectFormat.value as 'PNG' | 'JPG' | 'SVG';
-  if (currentData && collectImageAssets(currentData).length > 0) requestImageExport();
+  if (currentData) requestImageExport();
 });
 
 // Tab switching — pill style with active class
@@ -214,7 +239,19 @@ function showImageDownloadFeedback(count: number): void {
 }
 
 btnDownloadImages.addEventListener('click', async () => {
-  if (!currentData || Object.keys(currentImages).length === 0) return;
+  if (!currentData) return;
+
+  // Merged mode: single composite image, no zip
+  if (currentMode === 'merged') {
+    if (!currentMergedImage) return;
+    const safeName = currentData.name.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const ext = currentFormat === 'JPG' ? 'jpg' : currentFormat === 'SVG' ? 'svg' : 'png';
+    downloadBlob(`${safeName}.${ext}`, dataUrlToBlob(currentMergedImage));
+    showImageDownloadFeedback(1);
+    return;
+  }
+
+  if (Object.keys(currentImages).length === 0) return;
   const assets = collectImageAssets(currentData);
   // SVG for IMAGE fills falls back to original PNG (Figma SVG export bug);
   // Original mode (scale=0) also produces PNG
@@ -339,6 +376,7 @@ window.onmessage = (event: MessageEvent) => {
     currentJson = '';
     currentPromptText = '';
     currentImages = {};
+    currentMergedImage = null;
     // Show empty states, hide content
     jsonOutput.textContent = '';
     jsonOutput.classList.add('hidden');
@@ -363,6 +401,7 @@ window.onmessage = (event: MessageEvent) => {
     currentJson = JSON.stringify(msg.data, null, 2);
     currentPromptText = buildPrompt(msg.data);
     currentImages = {}; // reset — images arrive later via image-data
+    currentMergedImage = null;
 
     // Hide empty states, show content
     emptyJson.classList.add('hidden');
@@ -382,20 +421,39 @@ window.onmessage = (event: MessageEvent) => {
     exportRow.classList.toggle('hidden', imageCount === 0);
 
     let status = `Selected: ${msg.data.name} (${msg.data.type}) — ${msg.meta.nodeCount} nodes`;
-    if (imageCount > 0) status += ` · ${imageCount} images (loading…)`;
+    if (imageCount > 0) {
+      status += currentMode === 'merged' ? ' · merged (loading…)' : ` · ${imageCount} images (loading…)`;
+    }
     statusText.textContent = status;
     setStatusDot(imageCount > 0 ? 'loading' : 'active');
     if (imageCount > 0) statusDot.classList.add('loading');
+
+    // Sandbox auto-triggers per-image export on selection change. If the user
+    // previously chose merged mode, override with a merged request now.
+    if (imageCount > 0 && currentMode === 'merged') {
+      requestImageExport();
+    }
     return;
   }
 
   if (msg.type === 'image-data') {
     currentImages = msg.images;
-    const loaded = Object.keys(currentImages).length;
+    currentMergedImage = msg.merged ?? null;
+    const loaded = currentMergedImage ? 1 : Object.keys(currentImages).length;
     btnDownloadImages.disabled = loaded === 0;
-    statusText.textContent = loaded > 0
-      ? (statusText.textContent ?? '').replace(/\d+ images \(loading…\)/, `${loaded} images ✓`)
-      : (statusText.textContent ?? '').replace(/\d+ images \(loading…\)/, 'images failed');
+
+    const prevStatus = statusText.textContent ?? '';
+    if (currentMergedImage) {
+      statusText.textContent = prevStatus
+        .replace(/\d+ images \(loading…\)/, 'merged ✓')
+        .replace(/merged \(loading…\)/, 'merged ✓');
+    } else {
+      statusText.textContent = loaded > 0
+        ? prevStatus.replace(/\d+ images \(loading…\)/, `${loaded} images ✓`)
+        : prevStatus
+            .replace(/\d+ images \(loading…\)/, 'images failed')
+            .replace(/merged \(loading…\)/, 'merged failed');
+    }
     setStatusDot(loaded > 0 ? 'active' : 'error');
     statusDot.classList.remove('loading');
     return;
