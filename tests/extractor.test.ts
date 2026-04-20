@@ -194,6 +194,23 @@ describe('extractNode', () => {
     expect(result!.strokeGeometry).toEqual([{ windingRule: 'NONE', data: 'M 0 0 L 10 10' }]);
   });
 
+  it('drops fillGeometry on non-vector types (text, frame, rectangle)', () => {
+    const path = [{ windingRule: 'NONZERO', data: 'M 0 0 L 10 0 L 10 10 Z' }];
+    for (const type of ['TEXT', 'FRAME', 'RECTANGLE', 'ELLIPSE', 'INSTANCE'] as const) {
+      const node = {
+        id: `id-${type}`, name: type, type, visible: true,
+        width: 100, height: 20, fills: [], strokes: [], opacity: 1,
+        characters: type === 'TEXT' ? 'hello' : undefined,
+        fillGeometry: path,
+        strokeGeometry: path,
+      } as unknown as SceneNode;
+      const result = extractNode(node);
+      expect(result!.fillGeometry, `${type} should not carry fillGeometry`).toBeUndefined();
+      expect(result!.strokeGeometry, `${type} should not carry strokeGeometry`).toBeUndefined();
+      expect(result!.vectorPaths, `${type} should not carry vectorPaths`).toBeUndefined();
+    }
+  });
+
   it('traverses children of unknown container types', () => {
     const unknown = {
       id: '50:1', name: 'Custom Container', type: 'STICKY', visible: true,

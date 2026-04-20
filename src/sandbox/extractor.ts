@@ -7,6 +7,17 @@ const LEAF_TYPES = new Set<string>(['TEXT', 'RECTANGLE', 'ELLIPSE', 'LINE', 'VEC
 const GROUP_TYPES = new Set<string>(['GROUP']);
 const INSTANCE_TYPE = 'INSTANCE';
 
+// Only emit raw path data for nodes whose shape cannot be reconstructed from
+// other properties. Rectangles/frames are described by layout + cornerRadii;
+// text is described by content + typography; ellipses by their bounding box.
+const VECTOR_GEOMETRY_TYPES = new Set<string>([
+  'VECTOR',
+  'BOOLEAN_OPERATION',
+  'STAR',
+  'POLYGON',
+  'LINE',
+]);
+
 interface FillPaint {
   type: string;
   color?: { r: number; g: number; b: number };
@@ -76,6 +87,7 @@ function extractVectorPaths(value: unknown): UIVectorPath[] | undefined {
 
 function extractVectorData(node: AnyNode): Pick<UISerializedNode, 'vectorPaths' | 'fillGeometry' | 'strokeGeometry'> {
   const vectorData: Pick<UISerializedNode, 'vectorPaths' | 'fillGeometry' | 'strokeGeometry'> = {};
+  if (!VECTOR_GEOMETRY_TYPES.has(node.type)) return vectorData;
   const vectorPaths = extractVectorPaths(node.vectorPaths);
   if (vectorPaths) vectorData.vectorPaths = vectorPaths;
   const fillGeometry = extractVectorPaths(node.fillGeometry);
@@ -89,7 +101,7 @@ function normalizeEnumValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value.toLowerCase().replace(/_/g, '-') : undefined;
 }
 
-function normalizeConstraint(value: unknown): UILayout['constraints']['horizontal'] | undefined {
+function normalizeConstraint(value: unknown): NonNullable<UILayout['constraints']>['horizontal'] | undefined {
   const normalized = normalizeEnumValue(value);
   if (
     normalized === 'min' ||
