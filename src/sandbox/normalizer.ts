@@ -61,6 +61,7 @@ export function normalizeNode(node: UISerializedNode): UISerializedNode {
   // Round all numeric values in layout & style
   if (result.layout) result.layout = roundDeep(result.layout);
   if (result.style) result.style = roundDeep(result.style);
+  if (result.textStyleRanges) result.textStyleRanges = roundDeep(result.textStyleRanges);
 
   // children: empty → remove; non-empty → recurse
   if (result.children !== undefined) {

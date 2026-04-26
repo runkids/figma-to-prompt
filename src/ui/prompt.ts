@@ -119,6 +119,42 @@ export function collectTokens(node: UISerializedNode): DesignTokens {
           });
         }
       }
+      if (s.fills) {
+        const usage = n.type === 'TEXT' ? 'text' : 'background';
+        for (const paint of s.fills) {
+          if (paint.visible === false) continue;
+          if (paint.type === 'solid' && paint.color) {
+            const key = `${paint.color}|${paint.opacity ?? ''}|${usage}|${paint.variable ?? ''}`;
+            if (!colors.has(key)) {
+              colors.set(key, {
+                hex: paint.color,
+                opacity: paint.opacity,
+                variable: paint.variable,
+                usage,
+              });
+            }
+          }
+          if (paint.type === 'gradient' && paint.css) {
+            gradientSet.add(paint.css);
+          }
+        }
+      }
+      if (s.strokes) {
+        for (const paint of s.strokes) {
+          if (paint.visible === false) continue;
+          if (paint.type === 'solid' && paint.color) {
+            const key = `${paint.color}|${paint.opacity ?? ''}|border|${paint.variable ?? ''}`;
+            if (!colors.has(key)) {
+              colors.set(key, {
+                hex: paint.color,
+                opacity: paint.opacity,
+                variable: paint.variable,
+                usage: 'border',
+              });
+            }
+          }
+        }
+      }
 
       if (s.fontFamily || s.fontSize) {
         const key = `${s.fontFamily ?? ''}|${s.fontSize ?? ''}|${s.fontWeight ?? ''}`;
@@ -361,6 +397,50 @@ export function buildFidelityRiskSummary(node: UISerializedNode): string {
   if (paintSignals.length > 0) lines.push(`- Paint risks: ${paintSignals.join(', ')}`);
 
   if (lines.length <= 2 && stats.totalNodes <= 20) return '';
+  return lines.join('\n');
+}
+
+interface FidelityWarningEntry {
+  path: string;
+  code: string;
+  message: string;
+  severity: 'info' | 'warning' | 'critical';
+}
+
+function collectFidelityWarnings(node: UISerializedNode): FidelityWarningEntry[] {
+  const entries: FidelityWarningEntry[] = [];
+
+  function walk(n: UISerializedNode, path: string[]): void {
+    if (n.visible === false) return;
+    const nextPath = [...path, formatPathSegment(n.name)];
+    if (n.fidelityWarnings) {
+      for (const warning of n.fidelityWarnings) {
+        entries.push({
+          path: nextPath.join(' > '),
+          code: warning.code,
+          message: warning.message,
+          severity: warning.severity ?? 'warning',
+        });
+      }
+    }
+    n.children?.forEach((child) => walk(child, nextPath));
+  }
+
+  walk(node, []);
+  return entries;
+}
+
+export function buildFidelityWarningsSection(node: UISerializedNode): string {
+  const warnings = collectFidelityWarnings(node);
+  if (warnings.length === 0) return '';
+
+  const lines = [
+    '## Fidelity Warnings',
+    'These are extracted from the JSON and mark places where the convenience fields may not be enough.',
+  ];
+  for (const warning of warnings) {
+    lines.push(`- [${warning.severity}] ${warning.path}: ${warning.code} - ${warning.message}`);
+  }
   return lines.join('\n');
 }
 
@@ -685,6 +765,7 @@ function buildVisualVerificationSection(node: UISerializedNode, hasMergedAsset: 
     `- Build against one exact ${size} viewport with \`html, body { margin: 0; }\` and global \`box-sizing: border-box\`.`,
     '- Use the Geometry Checklist as a lightweight self-check before styling polish; screenshot diff tooling is optional for complex frames.',
     '- For text, set explicit `font-size`, `font-weight`, `line-height`, and CSS `letter-spacing`; convert percent letter spacing to px from the font size.',
+    '- For mixed text, use `textStyleRanges` to split spans and preserve range-level fills, styles, links, and paragraph/list metadata.',
     '- For `layout.mode: none`, position children from their `layout.x/y` offsets relative to the parent.',
     '- For `layout.layoutPositioning: absolute`, remove that node from the parent flex flow and position it by `layout.x/y` even when the parent uses auto layout.',
     '- Preserve paint metadata such as fill opacity, image crop transforms, image filters, and gradient transforms when present in `style`.',
@@ -731,6 +812,8 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
 - Use semantic HTML elements
 - The JSON contains the full node tree with layout, style, and children
 - Preserve JSON child order as paint order; later siblings render above earlier siblings
+- Preserve \`style.fills\` and \`style.strokes\` paint-stack order when present; convenience fields like \`backgroundColor\` and \`imageFillHash\` only summarize the first renderable paints
+- Preserve \`textStyleRanges\` when present; node-level text style is only the common/default style
 - \`layout.mode\`: horizontal → flex row, vertical → flex column
 - \`layout.mode: none\` → position children by \`layout.x/y\` relative to the parent
 - \`layout.layoutPositioning: absolute\` → remove from parent flex flow and position by \`layout.x/y\`
@@ -793,6 +876,10 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
     const fidelityRiskSummary = buildFidelityRiskSummary(node);
     if (fidelityRiskSummary) {
       sections.push(fidelityRiskSummary);
+    }
+    const fidelityWarnings = buildFidelityWarningsSection(node);
+    if (fidelityWarnings) {
+      sections.push(fidelityWarnings);
     }
   }
 

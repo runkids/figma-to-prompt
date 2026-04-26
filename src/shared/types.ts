@@ -23,6 +23,8 @@ export interface UISerializedNode {
   layout?: UILayout;
   style?: UIStyle;
   text?: string;
+  /** Character-level style ranges when a text node mixes fonts, fills, links, or paragraph metadata */
+  textStyleRanges?: UITextStyleRange[];
   componentName?: string;
   /** Variant properties — e.g. { State: "Active", Size: "Large" } */
   componentProperties?: Record<string, string>;
@@ -30,6 +32,8 @@ export interface UISerializedNode {
   vectorPaths?: UIVectorPath[];
   fillGeometry?: UIVectorPath[];
   strokeGeometry?: UIVectorPath[];
+  /** Node-level caveats for Figma features that need special handling downstream */
+  fidelityWarnings?: UIFidelityWarning[];
   children?: UISerializedNode[];
 }
 
@@ -74,6 +78,10 @@ export interface UIStyle {
   blendMode?: string;
   isMask?: boolean;
   maskType?: 'alpha' | 'vector' | 'luminance';
+  /** Full Figma fill paint stack in paint order. Legacy convenience fields below still expose the first renderable paints. */
+  fills?: UIPaint[];
+  /** Full Figma stroke paint stack in paint order. */
+  strokes?: UIPaint[];
   backgroundColor?: string;
   backgroundOpacity?: number;
   color?: string;
@@ -153,6 +161,50 @@ export interface UIStyle {
 }
 
 export type UITransform = [[number, number, number], [number, number, number]];
+
+export interface UIPaint {
+  type: 'solid' | 'gradient' | 'image' | 'video' | 'pattern' | 'unknown';
+  /** Original Figma paint type, e.g. SOLID, GRADIENT_LINEAR, IMAGE */
+  sourceType: string;
+  visible?: boolean;
+  opacity?: number;
+  blendMode?: string;
+  color?: string;
+  variable?: string;
+  gradientType?: 'linear' | 'radial' | 'angular' | 'diamond';
+  css?: string;
+  gradientStops?: Array<{ color: string; position: number; opacity?: number; variable?: string }>;
+  transform?: UITransform;
+  imageHash?: string;
+  videoHash?: string;
+  scaleMode?: 'fill' | 'fit' | 'crop' | 'tile';
+  scalingFactor?: number;
+  rotation?: number;
+  filters?: UIImageFilters;
+  sourceNodeId?: string;
+  tileType?: string;
+  spacing?: { x: number; y: number };
+  horizontalAlignment?: 'start' | 'center' | 'end';
+}
+
+export interface UITextStyleRange {
+  start: number;
+  end: number;
+  text: string;
+  style: UIStyle;
+  hyperlink?: { type: string; value?: string };
+  listOptions?: { type?: string; ordered?: boolean };
+  listSpacing?: number;
+  indentation?: number;
+  paragraphIndent?: number;
+  paragraphSpacing?: number;
+}
+
+export interface UIFidelityWarning {
+  code: string;
+  message: string;
+  severity?: 'info' | 'warning' | 'critical';
+}
 
 export interface UIImageFilters {
   exposure?: number;

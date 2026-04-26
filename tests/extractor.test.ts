@@ -444,6 +444,59 @@ describe('extractNode', () => {
     expect(result!.style?.backgroundColor).toBeUndefined();
   });
 
+  it('preserves the full fill and stroke paint stacks', () => {
+    const result = extractNode(mockRectangleNode({
+      fills: [
+        { type: 'SOLID', color: { r: 1, g: 0, b: 0 }, opacity: 0.5, visible: true },
+        {
+          type: 'GRADIENT_LINEAR',
+          visible: true,
+          gradientTransform: [[1, 0, 0], [0, 1, 0]],
+          gradientStops: [
+            { position: 0, color: { r: 1, g: 1, b: 1, a: 1 } },
+            { position: 1, color: { r: 0, g: 0, b: 0, a: 0.25 } },
+          ],
+        },
+        { type: 'IMAGE', visible: true, imageHash: 'img123', scaleMode: 'FILL' },
+        { type: 'VIDEO', visible: true, videoHash: 'vid123', scaleMode: 'CROP' },
+      ],
+      strokes: [
+        { type: 'SOLID', color: { r: 0, g: 0, b: 0 }, opacity: 1, visible: true },
+        { type: 'SOLID', color: { r: 1, g: 1, b: 1 }, opacity: 0.4, visible: true },
+      ],
+    }) as SceneNode);
+
+    expect(result!.style?.backgroundColor).toBe('#FF0000');
+    expect(result!.style?.backgroundOpacity).toBe(0.5);
+    expect(result!.style?.imageFillHash).toBe('img123');
+    expect(result!.style?.fills?.map((paint) => paint.type)).toEqual(['solid', 'gradient', 'image', 'video']);
+    expect(result!.style?.fills?.[1]).toEqual(expect.objectContaining({
+      type: 'gradient',
+      gradientType: 'linear',
+      css: 'linear-gradient(#FFFFFF 0%, #000000 100%)',
+      gradientStops: [
+        { color: '#FFFFFF', position: 0 },
+        { color: '#000000', position: 1, opacity: 0.25 },
+      ],
+    }));
+    expect(result!.style?.fills?.[2]).toEqual(expect.objectContaining({
+      type: 'image',
+      imageHash: 'img123',
+      scaleMode: 'fill',
+    }));
+    expect(result!.style?.fills?.[3]).toEqual(expect.objectContaining({
+      type: 'video',
+      videoHash: 'vid123',
+      scaleMode: 'crop',
+    }));
+    expect(result!.style?.strokes?.map((paint) => paint.color)).toEqual(['#000000', '#FFFFFF']);
+    expect(result!.fidelityWarnings?.map((warning) => warning.code)).toEqual([
+      'multiple-fills',
+      'multiple-strokes',
+      'unsupported-fill-video',
+    ]);
+  });
+
   it('extracts position and rotation', () => {
     const rect = mockRectangleNode({ x: 24, y: 16, rotation: 45 });
     const result = extractNode(rect as SceneNode);
@@ -513,5 +566,58 @@ describe('extractNode', () => {
     expect(result!.style?.backgroundColor).toBe('#FFFFFF');
     expect(result!.style?.imageFillHash).toBe('overlay123');
     expect(result!.style?.imageFillScaleMode).toBe('crop');
+  });
+
+  it('extracts mixed text style ranges when available', () => {
+    const result = extractNode(mockTextNode({
+      characters: 'Hello link',
+      getStyledTextSegments: () => [
+        {
+          start: 0,
+          end: 5,
+          characters: 'Hello',
+          fontName: { family: 'Inter', style: 'Regular' },
+          fontSize: 16,
+          fontWeight: 400,
+          lineHeight: { unit: 'PIXELS', value: 24 },
+          letterSpacing: { unit: 'PIXELS', value: 0 },
+          fills: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 }, opacity: 1, visible: true }],
+          textDecoration: 'NONE',
+          textCase: 'ORIGINAL',
+        },
+        {
+          start: 6,
+          end: 10,
+          characters: 'link',
+          fontName: { family: 'Inter', style: 'Bold' },
+          fontSize: 16,
+          fontWeight: 700,
+          lineHeight: { unit: 'PIXELS', value: 24 },
+          letterSpacing: { unit: 'PIXELS', value: 0 },
+          fills: [{ type: 'SOLID', color: { r: 0, g: 0.2, b: 1 }, opacity: 1, visible: true }],
+          textDecoration: 'UNDERLINE',
+          textCase: 'ORIGINAL',
+          hyperlink: { type: 'URL', value: 'https://example.com' },
+          paragraphSpacing: 8,
+        },
+      ],
+    }) as SceneNode);
+
+    expect(result!.textStyleRanges).toHaveLength(2);
+    expect(result!.textStyleRanges![0]).toEqual(expect.objectContaining({
+      start: 0,
+      end: 5,
+      text: 'Hello',
+      style: expect.objectContaining({ fontFamily: 'Inter', fontWeight: 400, color: '#000000' }),
+    }));
+    expect(result!.textStyleRanges![1]).toEqual(expect.objectContaining({
+      start: 6,
+      end: 10,
+      text: 'link',
+      hyperlink: { type: 'url', value: 'https://example.com' },
+      paragraphSpacing: 8,
+      style: expect.objectContaining({ fontWeight: 700, color: '#0033FF', textDecoration: 'underline' }),
+    }));
+    expect(result!.fidelityWarnings?.map((warning) => warning.code)).toContain('mixed-text-styles');
   });
 });

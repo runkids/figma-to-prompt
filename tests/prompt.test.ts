@@ -9,6 +9,7 @@ import {
   collectImageAssets,
   buildGeometryChecklist,
   buildFidelityRiskSummary,
+  buildFidelityWarningsSection,
 } from '../src/ui/prompt';
 import type { UISerializedNode } from '../src/shared/types';
 
@@ -127,6 +128,28 @@ describe('collectTokens', () => {
     const bgTokens = tokens.colors.filter((c) => c.hex === '#FFF' && c.usage === 'background');
     expect(bgTokens).toHaveLength(1);
   });
+
+  it('collects additional colors from full paint stacks', () => {
+    const node: UISerializedNode = {
+      id: '1',
+      name: 'Layered',
+      type: 'RECTANGLE',
+      layout: { width: 100, height: 100 },
+      style: {
+        fills: [
+          { type: 'solid', sourceType: 'SOLID', color: '#FFFFFF' },
+          { type: 'solid', sourceType: 'SOLID', color: '#FF0000', opacity: 0.4, variable: 'Brand/Overlay' },
+          { type: 'gradient', sourceType: 'GRADIENT_LINEAR', css: 'linear-gradient(#000000 0%, #FFFFFF 100%)' },
+        ],
+      },
+    };
+    const tokens = collectTokens(node);
+    expect(tokens.colors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ hex: '#FFFFFF', usage: 'background' }),
+      expect.objectContaining({ hex: '#FF0000', opacity: 0.4, variable: 'Brand/Overlay', usage: 'background' }),
+    ]));
+    expect(tokens.gradients).toContain('linear-gradient(#000000 0%, #FFFFFF 100%)');
+  });
 });
 
 describe('collectComponentDeps', () => {
@@ -211,6 +234,8 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('layout.sizing');
     expect(prompt).toContain('layout.layoutPositioning');
     expect(prompt).toContain('paint order');
+    expect(prompt).toContain('style.fills');
+    expect(prompt).toContain('textStyleRanges');
   });
 
   it('omits dependencies section when no instances', () => {
@@ -269,6 +294,37 @@ describe('buildPrompt', () => {
     expect(summary).toContain('nodes with layer blend mode');
     expect(summary).toContain('mask nodes');
     expect(buildPrompt(node)).toContain('## Fidelity Risk Summary');
+  });
+
+  it('includes fidelity warnings when extracted JSON marks precision risks', () => {
+    const node: UISerializedNode = {
+      id: 'root',
+      name: 'Root',
+      type: 'FRAME',
+      layout: { width: 100, height: 100, mode: 'none' },
+      children: [
+        {
+          id: 'text',
+          name: 'Label',
+          type: 'TEXT',
+          text: 'Hello',
+          layout: { width: 50, height: 20 },
+          fidelityWarnings: [
+            {
+              code: 'mixed-text-styles',
+              severity: 'warning',
+              message: '2 text style ranges detected; use textStyleRanges for per-character styling instead of only node-level style.',
+            },
+          ],
+        },
+      ],
+    };
+
+    const section = buildFidelityWarningsSection(node);
+    expect(section).toContain('## Fidelity Warnings');
+    expect(section).toContain('Root > Label');
+    expect(section).toContain('mixed-text-styles');
+    expect(buildPrompt(node)).toContain('## Fidelity Warnings');
   });
 
   it('supports compact prompt detail by omitting helper sections', () => {

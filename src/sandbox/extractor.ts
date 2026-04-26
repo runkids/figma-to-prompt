@@ -1,4 +1,15 @@
-import type { UISerializedNode, UINodeType, UILayout, UIStyle, UIImageFilters, UITransform, UIVectorPath } from '@shared/types';
+import type {
+  UIFidelityWarning,
+  UIImageFilters,
+  UILayout,
+  UINodeType,
+  UIPaint,
+  UISerializedNode,
+  UIStyle,
+  UITextStyleRange,
+  UITransform,
+  UIVectorPath,
+} from '@shared/types';
 import { rgbaToHex, normalizeLineHeight } from './normalizer';
 
 // Types that we know how to fully extract
@@ -24,6 +35,7 @@ interface FillPaint {
   opacity?: number;
   visible?: boolean;
   blendMode?: string;
+  boundVariables?: { color?: { id?: string } };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -124,6 +136,11 @@ function resolveVariableName(variableId: string): string | undefined {
   } catch { return undefined; }
 }
 
+function resolveVariableAliasName(alias: unknown): string | undefined {
+  const variableId = (alias as { id?: unknown } | undefined)?.id;
+  return typeof variableId === 'string' ? resolveVariableName(variableId) : undefined;
+}
+
 /** Resolve a Figma style ID to its style name */
 function resolveStyleName(styleId: unknown): string | undefined {
   if (typeof figma === 'undefined') return undefined;
@@ -132,6 +149,144 @@ function resolveStyleName(styleId: unknown): string | undefined {
     const style = figma.getStyleById(styleId as string);
     return style?.name;
   } catch { return undefined; }
+}
+
+function normalizeScaleMode(value: unknown): UIPaint['scaleMode'] | undefined {
+  const normalized = normalizeEnumValue(value);
+  if (normalized === 'fill' || normalized === 'fit' || normalized === 'crop' || normalized === 'tile') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function gradientTypeFromFigma(value: unknown): UIPaint['gradientType'] | undefined {
+  if (value === 'GRADIENT_LINEAR') return 'linear';
+  if (value === 'GRADIENT_RADIAL') return 'radial';
+  if (value === 'GRADIENT_ANGULAR') return 'angular';
+  if (value === 'GRADIENT_DIAMOND') return 'diamond';
+  return undefined;
+}
+
+function gradientCssType(value: unknown): 'linear-gradient' | 'radial-gradient' {
+  return value === 'GRADIENT_RADIAL' ? 'radial-gradient' : 'linear-gradient';
+}
+
+function gradientStopsFromPaint(paint: AnyNode): NonNullable<UIPaint['gradientStops']> {
+  const stops: AnyNode[] = Array.isArray(paint.gradientStops) ? paint.gradientStops : [];
+  return stops
+    .map((stop) => {
+      const color = stop.color;
+      if (!color || typeof color.r !== 'number' || typeof color.g !== 'number' || typeof color.b !== 'number') {
+        return null;
+      }
+      const variable = resolveVariableAliasName(stop.boundVariables?.color);
+      return {
+        color: rgbaToHex({ r: color.r, g: color.g, b: color.b, a: color.a ?? 1 }),
+        position: typeof stop.position === 'number' ? stop.position : 0,
+        ...(typeof color.a === 'number' && color.a < 1 ? { opacity: color.a } : {}),
+        ...(variable ? { variable } : {}),
+      };
+    })
+    .filter((stop): stop is NonNullable<UIPaint['gradientStops']>[number] => stop !== null);
+}
+
+function gradientCssFromPaint(paint: AnyNode, stops = gradientStopsFromPaint(paint)): string | undefined {
+  if (stops.length === 0) return undefined;
+  const stopStrs = stops.map((stop) => `${stop.color} ${Math.round(stop.position * 100)}%`);
+  return `${gradientCssType(paint.type)}(${stopStrs.join(', ')})`;
+}
+
+function extractPaintStack(value: unknown): UIPaint[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const paints = value
+    .map((paint): UIPaint | null => {
+      const p = paint as AnyNode;
+      if (typeof p.type !== 'string') return null;
+      const base: UIPaint = {
+        type: 'unknown',
+        sourceType: p.type,
+        ...(p.visible === false ? { visible: false } : {}),
+        ...(paintOpacity(p) !== undefined ? { opacity: paintOpacity(p) } : {}),
+        ...(paintBlendMode(p) ? { blendMode: paintBlendMode(p) } : {}),
+      };
+
+      if (p.type === 'SOLID') {
+        const color = p.color;
+        const variable = resolveVariableAliasName(p.boundVariables?.color);
+        return {
+          ...base,
+          type: 'solid',
+          ...(color ? { color: rgbaToHex({ r: color.r, g: color.g, b: color.b, a: p.opacity ?? 1 }) } : {}),
+          ...(variable ? { variable } : {}),
+        };
+      }
+
+      if (p.type.includes('GRADIENT')) {
+        const stops = gradientStopsFromPaint(p);
+        const transform = extractTransform(p.gradientTransform);
+        const css = gradientCssFromPaint(p, stops);
+        return {
+          ...base,
+          type: 'gradient',
+          ...(gradientTypeFromFigma(p.type) ? { gradientType: gradientTypeFromFigma(p.type) } : {}),
+          ...(css ? { css } : {}),
+          ...(stops.length > 0 ? { gradientStops: stops } : {}),
+          ...(transform ? { transform } : {}),
+        };
+      }
+
+      if (p.type === 'IMAGE') {
+        const transform = extractTransform(p.imageTransform);
+        const filters = extractImageFilters(p.filters);
+        return {
+          ...base,
+          type: 'image',
+          ...(p.imageHash ? { imageHash: p.imageHash } : {}),
+          ...(normalizeScaleMode(p.scaleMode) ? { scaleMode: normalizeScaleMode(p.scaleMode) } : {}),
+          ...(transform ? { transform } : {}),
+          ...(typeof p.scalingFactor === 'number' ? { scalingFactor: p.scalingFactor } : {}),
+          ...(typeof p.rotation === 'number' && p.rotation !== 0 ? { rotation: p.rotation } : {}),
+          ...(filters ? { filters } : {}),
+        };
+      }
+
+      if (p.type === 'VIDEO') {
+        const transform = extractTransform(p.videoTransform);
+        const filters = extractImageFilters(p.filters);
+        return {
+          ...base,
+          type: 'video',
+          ...(p.videoHash ? { videoHash: p.videoHash } : {}),
+          ...(normalizeScaleMode(p.scaleMode) ? { scaleMode: normalizeScaleMode(p.scaleMode) } : {}),
+          ...(transform ? { transform } : {}),
+          ...(typeof p.scalingFactor === 'number' ? { scalingFactor: p.scalingFactor } : {}),
+          ...(typeof p.rotation === 'number' && p.rotation !== 0 ? { rotation: p.rotation } : {}),
+          ...(filters ? { filters } : {}),
+        };
+      }
+
+      if (p.type === 'PATTERN') {
+        const spacing = p.spacing && typeof p.spacing.x === 'number' && typeof p.spacing.y === 'number'
+          ? { x: p.spacing.x, y: p.spacing.y }
+          : undefined;
+        const horizontalAlignment = normalizeEnumValue(p.horizontalAlignment);
+        return {
+          ...base,
+          type: 'pattern',
+          ...(typeof p.sourceNodeId === 'string' ? { sourceNodeId: p.sourceNodeId } : {}),
+          ...(typeof p.tileType === 'string' ? { tileType: p.tileType.toLowerCase().replace(/_/g, '-') } : {}),
+          ...(typeof p.scalingFactor === 'number' ? { scalingFactor: p.scalingFactor } : {}),
+          ...(spacing ? { spacing } : {}),
+          ...(horizontalAlignment === 'start' || horizontalAlignment === 'center' || horizontalAlignment === 'end'
+            ? { horizontalAlignment }
+            : {}),
+        };
+      }
+
+      return base;
+    })
+    .filter((paint): paint is UIPaint => paint !== null);
+  return paints.length > 0 ? paints : undefined;
 }
 
 /** Extract variable bindings from node.boundVariables */
@@ -173,6 +328,8 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
 
   // Background / fill color
   const fills: FillPaint[] = node.fills ?? [];
+  const fillStack = extractPaintStack(fills);
+  if (fillStack) style.fills = fillStack;
   const fill = firstSolidFill(fills);
   if (fill?.color) {
     const hex = rgbaToHex({ r: fill.color.r, g: fill.color.g, b: fill.color.b, a: fill.opacity ?? 1 });
@@ -206,6 +363,8 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
 
   // Strokes
   const strokes: FillPaint[] = node.strokes ?? [];
+  const strokeStack = extractPaintStack(strokes);
+  if (strokeStack) style.strokes = strokeStack;
   const stroke = firstSolidFill(strokes);
   if (stroke?.color) {
     style.borderColor = rgbaToHex({ r: stroke.color.r, g: stroke.color.g, b: stroke.color.b, a: stroke.opacity ?? 1 });
@@ -338,26 +497,12 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
       : undefined;
     if (gradient) {
       const gNode = gradient as AnyNode;
-      const stops: AnyNode[] = gNode.gradientStops ?? [];
-      const gradientStops = stops.map((s: AnyNode) => ({
-        color: rgbaToHex({ r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a ?? 1 }),
-        position: s.position,
-        ...(typeof s.color.a === 'number' && s.color.a < 1 ? { opacity: s.color.a } : {}),
-      }));
-      const stopStrs = stops.map(
-        (s: AnyNode) =>
-          `${rgbaToHex({ r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a ?? 1 })} ${Math.round(s.position * 100)}%`,
-      );
-      const gradientTypeMap: Record<string, NonNullable<UIStyle['backgroundGradientType']>> = {
-        GRADIENT_LINEAR: 'linear',
-        GRADIENT_RADIAL: 'radial',
-        GRADIENT_ANGULAR: 'angular',
-        GRADIENT_DIAMOND: 'diamond',
-      };
-      const cssType = gNode.type === 'GRADIENT_RADIAL' ? 'radial-gradient' : 'linear-gradient';
+      const gradientStops = gradientStopsFromPaint(gNode);
+      const css = gradientCssFromPaint(gNode, gradientStops);
       if (!isText) {
-        style.backgroundGradient = `${cssType}(${stopStrs.join(', ')})`;
-        if (gradientTypeMap[gNode.type]) style.backgroundGradientType = gradientTypeMap[gNode.type];
+        if (css) style.backgroundGradient = css;
+        const gradientType = gradientTypeFromFigma(gNode.type);
+        if (gradientType) style.backgroundGradientType = gradientType;
         if (gradientStops.length > 0) style.backgroundGradientStops = gradientStops;
         const transform = extractTransform(gNode.gradientTransform);
         if (transform) style.backgroundGradientTransform = transform;
@@ -370,6 +515,88 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
   }
 
   return style;
+}
+
+function normalizeHyperlink(value: unknown): UITextStyleRange['hyperlink'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const h = value as Record<string, unknown>;
+  if (typeof h.type !== 'string') return undefined;
+  const rawValue = h.value ?? h.url ?? h.nodeID ?? h.nodeId;
+  return {
+    type: h.type.toLowerCase(),
+    ...(typeof rawValue === 'string' ? { value: rawValue } : {}),
+  };
+}
+
+function normalizeListOptions(value: unknown): UITextStyleRange['listOptions'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const l = value as Record<string, unknown>;
+  const out: NonNullable<UITextStyleRange['listOptions']> = {};
+  if (typeof l.type === 'string') out.type = l.type.toLowerCase().replace(/_/g, '-');
+  if (typeof l.ordered === 'boolean') out.ordered = l.ordered;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function rangeHasRichTextMetadata(range: UITextStyleRange): boolean {
+  return Boolean(
+    range.hyperlink ||
+      range.listOptions ||
+      range.listSpacing !== undefined ||
+      range.indentation !== undefined ||
+      range.paragraphIndent !== undefined ||
+      range.paragraphSpacing !== undefined,
+  );
+}
+
+function extractTextStyleRanges(node: AnyNode): UITextStyleRange[] | undefined {
+  if (typeof node.getStyledTextSegments !== 'function') return undefined;
+  try {
+    const segments: AnyNode[] = node.getStyledTextSegments([
+      'fontName',
+      'fontSize',
+      'fontWeight',
+      'lineHeight',
+      'letterSpacing',
+      'fills',
+      'textStyleId',
+      'fillStyleId',
+      'textDecoration',
+      'textCase',
+      'hyperlink',
+      'listOptions',
+      'listSpacing',
+      'indentation',
+      'paragraphIndent',
+      'paragraphSpacing',
+    ]);
+    const ranges = segments
+      .map((segment): UITextStyleRange | null => {
+        if (typeof segment.start !== 'number' || typeof segment.end !== 'number') return null;
+        const range: UITextStyleRange = {
+          start: segment.start,
+          end: segment.end,
+          text: typeof segment.characters === 'string' ? segment.characters : '',
+          style: extractTextStyle(segment),
+        };
+        const hyperlink = normalizeHyperlink(segment.hyperlink);
+        if (hyperlink) range.hyperlink = hyperlink;
+        const listOptions = normalizeListOptions(segment.listOptions);
+        if (listOptions) range.listOptions = listOptions;
+        if (typeof segment.listSpacing === 'number') range.listSpacing = segment.listSpacing;
+        if (typeof segment.indentation === 'number') range.indentation = segment.indentation;
+        if (typeof segment.paragraphIndent === 'number') range.paragraphIndent = segment.paragraphIndent;
+        if (typeof segment.paragraphSpacing === 'number') range.paragraphSpacing = segment.paragraphSpacing;
+        return range;
+      })
+      .filter((range): range is UITextStyleRange => range !== null);
+
+    if (ranges.length > 1 || ranges.some(rangeHasRichTextMetadata)) {
+      return ranges;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 function extractTextStyle(node: AnyNode): UIStyle {
@@ -542,6 +769,85 @@ function extractLayout(node: AnyNode): UILayout {
   return layout;
 }
 
+function visiblePaintCount(value: unknown): number {
+  return Array.isArray(value) ? value.filter((p: AnyNode) => p.visible !== false).length : 0;
+}
+
+function unsupportedPaintTypes(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .filter((p: AnyNode) => p.visible !== false && (p.type === 'VIDEO' || p.type === 'PATTERN'))
+        .map((p: AnyNode) => p.type.toLowerCase()),
+    ),
+  ];
+}
+
+function isMixedValue(value: unknown): boolean {
+  return typeof figma !== 'undefined' && value === figma.mixed;
+}
+
+function extractFidelityWarnings(node: AnyNode, textStyleRanges?: UITextStyleRange[]): UIFidelityWarning[] | undefined {
+  const warnings: UIFidelityWarning[] = [];
+  const fillCount = visiblePaintCount(node.fills);
+  const strokeCount = visiblePaintCount(node.strokes);
+  if (fillCount > 1) {
+    warnings.push({
+      code: 'multiple-fills',
+      severity: 'warning',
+      message: `${fillCount} visible fills detected; preserve style.fills paint stack in order instead of relying only on convenience fields.`,
+    });
+  }
+  if (strokeCount > 1) {
+    warnings.push({
+      code: 'multiple-strokes',
+      severity: 'warning',
+      message: `${strokeCount} visible strokes detected; preserve style.strokes paint stack in order.`,
+    });
+  }
+  for (const type of unsupportedPaintTypes(node.fills)) {
+    warnings.push({
+      code: `unsupported-fill-${type}`,
+      severity: 'critical',
+      message: `${type} fill metadata is captured but cannot be faithfully converted to plain CSS/HTML without a rendered asset or custom renderer.`,
+    });
+  }
+  for (const type of unsupportedPaintTypes(node.strokes)) {
+    warnings.push({
+      code: `unsupported-stroke-${type}`,
+      severity: 'critical',
+      message: `${type} stroke metadata is captured but cannot be faithfully converted to plain CSS/HTML without a rendered asset or custom renderer.`,
+    });
+  }
+  if (node.type === 'TEXT' && textStyleRanges && textStyleRanges.length > 1) {
+    warnings.push({
+      code: 'mixed-text-styles',
+      severity: 'warning',
+      message: `${textStyleRanges.length} text style ranges detected; use textStyleRanges for per-character styling instead of only node-level style.`,
+    });
+  }
+  if (node.type === 'TEXT' && (isMixedValue(node.fontName) || isMixedValue(node.fills)) && !textStyleRanges) {
+    warnings.push({
+      code: 'unresolved-mixed-text-style',
+      severity: 'warning',
+      message: 'Text node reports mixed style values, but styled text ranges were not available.',
+    });
+  }
+  return warnings.length > 0 ? warnings : undefined;
+}
+
+function finalizeNode(
+  result: UISerializedNode,
+  source: AnyNode,
+  textStyleRanges?: UITextStyleRange[],
+): UISerializedNode {
+  if (textStyleRanges) result.textStyleRanges = textStyleRanges;
+  const warnings = extractFidelityWarnings(source, textStyleRanges);
+  if (warnings) result.fidelityWarnings = warnings;
+  return result;
+}
+
 function recurseChildren(node: AnyNode): UISerializedNode[] | undefined {
   const children: AnyNode[] = node.children ?? [];
   const extracted = children
@@ -564,12 +870,13 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
 
   // TEXT — special: extract text content + typography
   if (nodeType === 'TEXT') {
-    return {
+    const textStyleRanges = extractTextStyleRanges(n);
+    return finalizeNode({
       ...base,
       text: n.characters as string,
       style: extractTextStyle(n),
       layout: extractLayout(n),
-    };
+    }, n, textStyleRanges);
   }
 
   // INSTANCE — extract componentName, variant properties, style, and children
@@ -599,7 +906,7 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
     // Expand children so active/inactive styles are visible
     const children = recurseChildren(n);
     if (children) result.children = children;
-    return result;
+    return finalizeNode(result, n);
   }
 
   // CONTAINER types — full layout + style + recurse children
@@ -611,7 +918,7 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
     };
     const children = recurseChildren(n);
     if (children) result.children = children;
-    return result;
+    return finalizeNode(result, n);
   }
 
   // GROUP — basic layout + recurse children (no style of its own)
@@ -622,16 +929,16 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
     };
     const children = recurseChildren(n);
     if (children) result.children = children;
-    return result;
+    return finalizeNode(result, n);
   }
 
   // Known LEAF types — layout + style, no children
   if (LEAF_TYPES.has(nodeType)) {
-    return {
+    return finalizeNode({
       ...base,
       layout: extractLayout(n),
       style: extractStyle(n),
-    };
+    }, n);
   }
 
   // FALLBACK: unknown type — traverse children if present, don't silently drop
@@ -644,13 +951,13 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
     };
     const children = recurseChildren(n);
     if (children) result.children = children;
-    return result;
+    return finalizeNode(result, n);
   }
 
   // Unknown leaf — still extract basic info instead of returning null
-  return {
+  return finalizeNode({
     ...base,
     layout: extractLayout(n),
     style: extractStyle(n),
-  };
+  }, n);
 }
