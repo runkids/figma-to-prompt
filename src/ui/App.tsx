@@ -12,7 +12,7 @@ import { ExportCard } from './components/ExportCard';
 import { Banners } from './components/Banners';
 import { StatusBar } from './components/StatusBar';
 import { ButtonGroup } from './components/ButtonGroup';
-import type { PromptDetailLevel } from '../shared/types';
+import type { PromptDetailLevel, UISerializedNode } from '../shared/types';
 
 type MergedTilesPayload = NonNullable<ImageDataMessage['mergedTiles']>;
 
@@ -77,6 +77,22 @@ const PROMPT_DETAIL_OPTIONS: { value: PromptDetailLevel; label: string }[] = [
   { value: 'detailed', label: 'Detailed' },
   { value: 'full', label: 'Full' },
 ];
+
+const DEPTH_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'all' },
+  { value: '1', label: '1' },
+  { value: '2', label: '2' },
+  { value: '3', label: '3' },
+];
+
+function truncateToDepth(node: UISerializedNode, depth: number): UISerializedNode {
+  if (!node.children) return node;
+  if (depth <= 0) return { ...node, children: [] };
+  return {
+    ...node,
+    children: node.children.map((c) => truncateToDepth(c, depth - 1)),
+  };
+}
 
 function sendToSandbox(msg: UIMessage): void {
   parent.postMessage({ pluginMessage: msg }, '*');
@@ -188,29 +204,35 @@ export function App() {
     };
   }, []);
 
+  // Apply depth truncation to the raw node tree. null = full tree.
+  const displayData = useMemo(() => {
+    if (!state.data || state.extractDepth === null) return state.data;
+    return truncateToDepth(state.data, state.extractDepth);
+  }, [state.data, state.extractDepth]);
+
   // Lazy-derive the active tab's text so rapid frame switching only pays for
   // whichever view is visible. Previously the reducer computed JSON.stringify
   // AND buildPrompt on every SELECTION_RECEIVED, thrashing the main thread.
   // useMemo caches across re-renders that don't touch these deps (e.g. image
   // arrivals, export-setting toggles).
   const text = useMemo(() => {
-    if (!state.data) return '';
-    if (state.tab === 'json') return JSON.stringify(state.data, null, 2);
-    const merged = state.mode === 'merged' && state.data.layout
+    if (!displayData) return '';
+    if (state.tab === 'json') return JSON.stringify(displayData, null, 2);
+    const merged = state.mode === 'merged' && displayData.layout
       ? {
-          name: state.mergedImageName.trim() || sanitizeFileName(state.data.name),
-          width: Math.round(state.data.layout.width),
-          height: Math.round(state.data.layout.height),
+          name: state.mergedImageName.trim() || sanitizeFileName(displayData.name),
+          width: Math.round(displayData.layout.width),
+          height: Math.round(displayData.layout.height),
         }
       : undefined;
-    return buildPrompt(state.data, {
+    return buildPrompt(displayData, {
       imageNameOverrides: state.nameOverrides,
       merged,
       promptDetail: state.promptDetail,
     });
   }, [
     state.tab,
-    state.data,
+    displayData,
     state.mode,
     state.nameOverrides,
     state.mergedImageName,
@@ -235,6 +257,18 @@ export function App() {
             value={state.promptDetail}
             onChange={(promptDetail) => dispatch({ type: 'PROMPT_DETAIL_CHANGED', promptDetail })}
           />
+        )}
+        {state.data && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span class="quality-label">Depth</span>
+            <ButtonGroup
+              ariaLabel="Extraction depth"
+              variant="chip"
+              options={DEPTH_OPTIONS}
+              value={state.extractDepth === null ? '' : String(state.extractDepth)}
+              onChange={(v) => dispatch({ type: 'EXTRACT_DEPTH_CHANGED', extractDepth: v === '' ? null : Number(v) })}
+            />
+          </div>
         )}
         <CopyButton tab={state.tab} text={text} />
         <ExportCard state={state} dispatch={dispatch} />

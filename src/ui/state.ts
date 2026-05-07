@@ -14,6 +14,8 @@ export interface State {
   data: UISerializedNode | null;
   tab: Tab;
   promptDetail: PromptDetailLevel;
+  /** Truncate the extracted tree to this many levels deep. null = unlimited. */
+  extractDepth: number | null;
   /** Preview images mirrored from the sandbox source. Download encoding is
    *  deferred until the user clicks Download so quality changes stay cheap. */
   images: Record<string, string>;
@@ -43,6 +45,7 @@ export const initialState: State = {
   data: null,
   tab: 'json',
   promptDetail: 'detailed',
+  extractDepth: null,
   images: {},
   mergedImage: null,
   rawImages: {},
@@ -69,6 +72,7 @@ export type Action =
   | { type: 'IMAGES_RECEIVED'; images: Record<string, string>; merged?: string | null }
   | { type: 'TAB_CHANGED'; tab: Tab }
   | { type: 'PROMPT_DETAIL_CHANGED'; promptDetail: PromptDetailLevel }
+  | { type: 'EXTRACT_DEPTH_CHANGED'; extractDepth: number | null }
   | { type: 'MODE_CHANGED'; mode: ExportMode }
   | { type: 'SCALE_CHANGED'; scale: number }
   | { type: 'FORMAT_CHANGED'; format: ImageFormat }
@@ -127,6 +131,7 @@ export function reducer(state: State, action: Action): State {
         ...initialState,
         tab: state.tab,
         promptDetail: state.promptDetail,
+        extractDepth: state.extractDepth,
         scale: state.scale,
         format: state.format,
         quality: state.quality,
@@ -176,6 +181,9 @@ export function reducer(state: State, action: Action): State {
 
     case 'PROMPT_DETAIL_CHANGED':
       return { ...state, promptDetail: action.promptDetail };
+
+    case 'EXTRACT_DEPTH_CHANGED':
+      return { ...state, extractDepth: action.extractDepth };
 
     case 'MODE_CHANGED': {
       const mode = action.mode;
