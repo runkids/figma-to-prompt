@@ -21,6 +21,7 @@ import {
 } from '../folder';
 import { loadDirHandle, saveDirHandle } from '../storage';
 import { ButtonGroup } from './ButtonGroup';
+import { HelpTip } from './HelpTip';
 
 interface Props {
   state: State;
@@ -266,6 +267,51 @@ function NameRow({
   );
 }
 
+// ── MockPathRow ─────────────────────────────────────────
+interface MockPathRowProps {
+  initialValue: string;
+  onCommit: (value: string) => void;
+}
+
+function MockPathRow({ initialValue, onCommit }: MockPathRowProps) {
+  const debouncedCommit = useDebouncedCallback(onCommit, NAME_DEBOUNCE_MS);
+
+  function handleInput(e: JSX.TargetedEvent<HTMLInputElement>) {
+    debouncedCommit(e.currentTarget.value);
+  }
+
+  function handleReset(e: JSX.TargetedMouseEvent<HTMLButtonElement>) {
+    const input = e.currentTarget.parentElement?.querySelector<HTMLInputElement>('.name-input');
+    if (input) input.value = '';
+    onCommit('');
+  }
+
+  return (
+    <div class="mock-path-row">
+      <span class="mock-path-label">Mock image</span>
+      <span class="name-input-wrap">
+        <input
+          type="text"
+          class="name-input mock-path-input"
+          placeholder="/absolute/path/to/image.png"
+          defaultValue={initialValue}
+          spellcheck={false}
+          onInput={handleInput}
+        />
+        <button
+          type="button"
+          class="name-reset"
+          title="Clear mock image path"
+          aria-label="Clear mock image path"
+          onClick={handleReset}
+        >
+          ×
+        </button>
+      </span>
+    </div>
+  );
+}
+
 // ── RenamesList ─────────────────────────────────────────
 function RenamesList({ state, assets, dispatch }: { state: State; assets: ImageAsset[]; dispatch: Props['dispatch'] }) {
   if (!state.data) return null;
@@ -291,17 +337,24 @@ function RenamesList({ state, assets, dispatch }: { state: State; assets: ImageA
           ? { name: `${base}.svg`, dataUrl: source }
           : undefined;
         return (
-          <NameRow
-            key={a.nodeId}
-            label={a.nodeName}
-            placeholder={a.fileName.replace(/\.png$/, '')}
-            initialValue={state.nameOverrides[a.nodeId] ?? ''}
-            ext={perImageExt(state.scale, state.format)}
-            thumbUrl={state.images[a.nodeId]}
-            svgCopySource={svgCopySource}
-            showSvgCopy={state.format === 'SVG'}
-            onCommit={(v) => dispatch({ type: 'NAME_OVERRIDE_CHANGED', id: a.nodeId, value: v })}
-          />
+          <div key={a.nodeId} class="asset-map-item">
+            <NameRow
+              label={a.nodeName}
+              placeholder={a.fileName.replace(/\.png$/, '')}
+              initialValue={state.nameOverrides[a.nodeId] ?? ''}
+              ext={perImageExt(state.scale, state.format)}
+              thumbUrl={state.images[a.nodeId]}
+              svgCopySource={svgCopySource}
+              showSvgCopy={state.format === 'SVG'}
+              onCommit={(v) => dispatch({ type: 'NAME_OVERRIDE_CHANGED', id: a.nodeId, value: v })}
+            />
+            {state.tab === 'prompt' && (
+              <MockPathRow
+                initialValue={state.mockImagePaths[a.nodeId] ?? ''}
+                onCommit={(v) => dispatch({ type: 'MOCK_IMAGE_PATH_CHANGED', id: a.nodeId, value: v })}
+              />
+            )}
+          </div>
         );
       })}
     </>
@@ -676,9 +729,13 @@ export function ExportCard({ state, dispatch }: Props) {
 
   const namesToggleText = state.mode === 'merged'
     ? 'Rename file'
-    : assets.length === 1
-      ? 'Rename 1 image'
-      : `Rename ${assets.length} images`;
+    : state.tab === 'prompt'
+      ? assets.length === 1
+        ? 'Map 1 image'
+        : `Map ${assets.length} images`
+      : assets.length === 1
+        ? 'Rename 1 image'
+        : `Rename ${assets.length} images`;
 
   return (
     <section class="export-card" aria-label="Export image">
@@ -722,6 +779,12 @@ export function ExportCard({ state, dispatch }: Props) {
       <details key={state.data.id} class="names-row">
         <summary class="names-toggle">
           <span>{namesToggleText}</span>
+          {state.tab === 'prompt' && state.mode !== 'merged' && (
+            <HelpTip
+              label="Map images help"
+              text="Use this when your AI agent will receive image paths from the project. Enter the exact path for each image fill so the prompt tells the agent to use that file instead of guessing."
+            />
+          )}
         </summary>
         <div class="names-list">
           <RenamesList state={state} assets={assets} dispatch={dispatch} />

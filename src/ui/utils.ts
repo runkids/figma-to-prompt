@@ -25,16 +25,21 @@ function execCopy(text: string): boolean {
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {
+  // In Figma's iframe, navigator.clipboard.writeText can resolve without
+  // updating the system clipboard. Keep the synchronous copy path first so it
+  // still runs inside the user's click activation.
+  if (execCopy(text)) return true;
+
   const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
   if (clipboard?.writeText) {
     try {
       await clipboard.writeText(text);
       return true;
     } catch {
-      return execCopy(text);
+      return false;
     }
   }
-  return execCopy(text);
+  return false;
 }
 
 /** scale=0 pulls the original PNG raster via getImageByHash, then we transcode

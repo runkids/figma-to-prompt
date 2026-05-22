@@ -198,6 +198,15 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('semantic HTML');
   });
 
+  it('supports pixel-perfect prompt template', () => {
+    const prompt = buildPrompt(sampleNode, { promptTemplate: 'pixel-perfect' });
+    expect(prompt).toContain('# Pixel-perfect Figma rebuild: Login Card');
+    expect(prompt).toContain('pixel-perfect visual fidelity');
+    expect(prompt).toContain('## Pixel Perfect Template');
+    expect(prompt).toContain('Capture a screenshot at that same size');
+    expect(prompt).toContain('Do not approximate missing images');
+  });
+
   it('includes design tokens section with colors', () => {
     const prompt = buildPrompt(richNode);
     expect(prompt).toContain('## Design Tokens');
@@ -665,6 +674,15 @@ describe('image assets', () => {
       expect(assets[1].fileName).toBe('Hero_Section_Profile_Avatar.png');
     });
 
+    it('preserves user-supplied mock image paths', () => {
+      const assets = collectImageAssets(nodeWithImage, undefined, { '2': '/assets/mock/hero.png' });
+      expect(assets[0]).toEqual(expect.objectContaining({
+        fileName: 'Hero_Section_Hero_Background.png',
+        mockPath: '/assets/mock/hero.png',
+      }));
+      expect(assets[1].mockPath).toBeUndefined();
+    });
+
     it('resolves override collisions with _N suffix', () => {
       const assets = collectImageAssets(nodeWithImage, { '2': 'dup', '3': 'dup' });
       expect(assets.map((a) => a.fileName)).toEqual(['dup_1.png', 'dup_2.png']);
@@ -729,6 +747,26 @@ describe('image assets', () => {
       const prompt = buildPrompt(nodeWithImage, { imageNameOverrides: { '2': 'hero_bg' } });
       expect(prompt).toContain('`hero_bg.png`');
       expect(prompt).not.toContain('`Hero_Section_Hero_Background.png`');
+    });
+
+    it('uses user-supplied mock image paths in Assets section', () => {
+      const prompt = buildPrompt(nodeWithImage, {
+        mockImagePaths: { '2': '/assets/mock/hero.png' },
+      });
+      expect(prompt).toContain('Image paths supplied by the user');
+      expect(prompt).toContain('mock image `/assets/mock/hero.png` → Hero Background');
+      expect(prompt).toContain('Do not invent, replace, or regenerate these images');
+      expect(prompt).toContain('`Hero_Section_Profile_Avatar.png`');
+    });
+
+    it('combines mock image paths with the pixel-perfect template', () => {
+      const prompt = buildPrompt(nodeWithImage, {
+        promptTemplate: 'pixel-perfect',
+        mockImagePaths: { '2': '/assets/mock/hero.png' },
+      });
+      expect(prompt).toContain('Use every listed mock image path exactly');
+      expect(prompt).toContain('mock image `/assets/mock/hero.png` → Hero Background');
+      expect(prompt).toContain('Compare it against the reference image');
     });
 
     it('reflects image paint metadata in Assets section', () => {

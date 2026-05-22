@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer } from 'preact/hooks';
+import { useEffect, useMemo, useReducer, useState } from 'preact/hooks';
 import { initialState, reducer } from './state';
 import { buildPrompt, sanitizeFileName } from './prompt';
 import { toSandboxFormat } from './transcode';
@@ -12,7 +12,9 @@ import { ExportCard } from './components/ExportCard';
 import { Banners } from './components/Banners';
 import { StatusBar } from './components/StatusBar';
 import { ButtonGroup } from './components/ButtonGroup';
-import type { PromptDetailLevel, UISerializedNode } from '../shared/types';
+import { HelpTip } from './components/HelpTip';
+import { TextPreviewModal } from './components/PromptPreviewModal';
+import type { PromptDetailLevel, PromptTemplate, UISerializedNode } from '../shared/types';
 
 type MergedTilesPayload = NonNullable<ImageDataMessage['mergedTiles']>;
 
@@ -78,6 +80,11 @@ const PROMPT_DETAIL_OPTIONS: { value: PromptDetailLevel; label: string }[] = [
   { value: 'full', label: 'Full' },
 ];
 
+const PROMPT_TEMPLATE_OPTIONS: { value: PromptTemplate; label: string }[] = [
+  { value: 'component', label: 'Component' },
+  { value: 'pixel-perfect', label: 'Pixel Perfect' },
+];
+
 const DEPTH_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'all' },
   { value: '1', label: '1' },
@@ -110,6 +117,7 @@ function compareVersions(a: string, b: string): number {
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [isTextPreviewOpen, setTextPreviewOpen] = useState(false);
 
   // Sandbox → UI message bridge
   useEffect(() => {
@@ -227,7 +235,9 @@ export function App() {
       : undefined;
     return buildPrompt(displayData, {
       imageNameOverrides: state.nameOverrides,
+      mockImagePaths: state.mockImagePaths,
       merged,
+      promptTemplate: state.promptTemplate,
       promptDetail: state.promptDetail,
     });
   }, [
@@ -235,7 +245,9 @@ export function App() {
     displayData,
     state.mode,
     state.nameOverrides,
+    state.mockImagePaths,
     state.mergedImageName,
+    state.promptTemplate,
     state.promptDetail,
   ]);
 
@@ -250,13 +262,34 @@ export function App() {
       />
       <div class="actions-bar">
         {state.tab === 'prompt' && state.data && (
-          <ButtonGroup
-            ariaLabel="Prompt detail"
-            variant="chip"
-            options={PROMPT_DETAIL_OPTIONS}
-            value={state.promptDetail}
-            onChange={(promptDetail) => dispatch({ type: 'PROMPT_DETAIL_CHANGED', promptDetail })}
-          />
+          <div class="prompt-options">
+            <div class="prompt-option">
+              <span class="label-row">
+                <span class="quality-label">Template</span>
+                <HelpTip
+                  label="Prompt template help"
+                  text="Component creates a maintainable frontend component. Pixel Perfect creates a stricter prompt for visual matching with reference images, mock paths, and screenshot comparison."
+                />
+              </span>
+              <ButtonGroup
+                ariaLabel="Prompt template"
+                variant="segmented"
+                options={PROMPT_TEMPLATE_OPTIONS}
+                value={state.promptTemplate}
+                onChange={(promptTemplate) => dispatch({ type: 'PROMPT_TEMPLATE_CHANGED', promptTemplate })}
+              />
+            </div>
+            <div class="prompt-option">
+              <span class="quality-label">Detail</span>
+              <ButtonGroup
+                ariaLabel="Prompt detail"
+                variant="chip"
+                options={PROMPT_DETAIL_OPTIONS}
+                value={state.promptDetail}
+                onChange={(promptDetail) => dispatch({ type: 'PROMPT_DETAIL_CHANGED', promptDetail })}
+              />
+            </div>
+          </div>
         )}
         {state.data && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -270,11 +303,30 @@ export function App() {
             />
           </div>
         )}
-        <CopyButton tab={state.tab} text={text} />
+        <div class={`copy-actions${state.data ? '' : ' copy-actions--single'}`}>
+          {state.data && (
+            <button
+              type="button"
+              class="btn-secondary"
+              disabled={!text}
+              onClick={() => setTextPreviewOpen(true)}
+            >
+              {state.tab === 'json' ? 'Preview JSON' : 'Preview Prompt'}
+            </button>
+          )}
+          <CopyButton tab={state.tab} text={text} />
+        </div>
         <ExportCard state={state} dispatch={dispatch} />
       </div>
       <Banners protocolMismatch={state.protocolMismatch} updateAvailable={state.updateAvailable} />
       <StatusBar state={state} />
+      {isTextPreviewOpen && (
+        <TextPreviewModal
+          tab={state.tab}
+          text={text}
+          onClose={() => setTextPreviewOpen(false)}
+        />
+      )}
     </>
   );
 }

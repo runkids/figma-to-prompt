@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { AVIF_DEFAULT_QUALITY, DEFAULT_QUALITY, initialState, reducer } from '../src/ui/state';
 
 describe('export quality state', () => {
+  it('updates and preserves prompt template preference', () => {
+    let state = reducer(initialState, { type: 'PROMPT_TEMPLATE_CHANGED', promptTemplate: 'pixel-perfect' });
+    expect(state.promptTemplate).toBe('pixel-perfect');
+
+    state = reducer(state, { type: 'SELECTION_EMPTY' });
+    expect(state.promptTemplate).toBe('pixel-perfect');
+  });
+
   it('updates and preserves prompt detail preference', () => {
     let state = reducer(initialState, { type: 'PROMPT_DETAIL_CHANGED', promptDetail: 'compact' });
     expect(state.promptDetail).toBe('compact');
@@ -56,5 +64,16 @@ describe('export quality state', () => {
     expect(state.images).toEqual({ '1:2': 'data:image/png;base64,preview' });
     expect(state.rawImages).toEqual({ '1:2': 'data:image/png;base64,source' });
     expect(state.exportRequestId).toBe(3);
+  });
+
+  it('updates mock image paths and clears them for a new selection', () => {
+    let state = reducer(initialState, { type: 'MOCK_IMAGE_PATH_CHANGED', id: '2', value: ' /assets/mock/hero.png ' });
+    expect(state.mockImagePaths).toEqual({ '2': '/assets/mock/hero.png' });
+
+    state = reducer(state, {
+      type: 'SELECTION_RECEIVED',
+      data: { id: '1', name: 'Frame', type: 'FRAME', layout: { width: 10, height: 10 } },
+    });
+    expect(state.mockImagePaths).toEqual({});
   });
 });

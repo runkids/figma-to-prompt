@@ -217,6 +217,7 @@ export interface UIImageFilters {
 }
 
 export type PromptDetailLevel = 'compact' | 'detailed' | 'full';
+export type PromptTemplate = 'component' | 'pixel-perfect';
 
 /**
  * Protocol version for sandbox ↔ UI compatibility.

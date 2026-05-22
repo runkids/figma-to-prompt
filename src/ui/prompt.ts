@@ -5,6 +5,7 @@ import type {
   UIImageFilters,
   UITransform,
   PromptDetailLevel,
+  PromptTemplate,
 } from '../shared/types';
 import { getImageAssetKey, hasRenderSpecificImagePaint } from '../shared/imageAssets';
 
@@ -450,6 +451,7 @@ export interface ImageAsset {
   hash: string;
   nodeId: string;
   fileName: string;
+  mockPath?: string;
   nodeName: string;
   width: number;
   height: number;
@@ -464,6 +466,7 @@ export interface ImageAsset {
 export function collectImageAssets(
   node: UISerializedNode,
   overrides?: ImageNameOverrides,
+  mockImagePaths?: ImageNameOverrides,
 ): ImageAsset[] {
   const assets = new Map<string, ImageAsset>();
 
@@ -480,6 +483,7 @@ export function collectImageAssets(
         hash: n.style.imageFillHash,
         nodeId: n.id,
         fileName: `${safeName}.png`,
+        mockPath: mockImagePaths?.[n.id]?.trim() || undefined,
         nodeName: n.name,
         width: Math.round(n.layout?.width ?? 0),
         height: Math.round(n.layout?.height ?? 0),
@@ -780,13 +784,53 @@ function buildVisualVerificationSection(node: UISerializedNode, hasMergedAsset: 
   return lines.join('\n');
 }
 
+function buildPixelPerfectTemplateSection(node: UISerializedNode, hasMergedAsset: boolean, hasMockPaths: boolean): string {
+  const size = node.layout
+    ? `${formatNumber(node.layout.width)}×${formatNumber(node.layout.height)}`
+    : 'the extracted root size';
+  const referenceLine = hasMergedAsset
+    ? '- Use the attached whole-frame composite image as the visual source of truth.'
+    : '- If a whole-frame reference image is supplied separately, use it as the visual source of truth.';
+  const assetLine = hasMockPaths
+    ? '- Use every listed mock image path exactly; do not generate, crop from memory, or replace those images.'
+    : '- Use every listed exported image file exactly; if any required asset is missing, stop and ask for it.';
+
+  return [
+    '## Pixel Perfect Template',
+    'You are rebuilding this Figma frame for an exact visual match. Treat the JSON as geometry/style data and the reference image/assets as visual evidence.',
+    '',
+    '### Required Inputs',
+    '- JSON component structure below.',
+    referenceLine,
+    assetLine,
+    '',
+    '### Render Target',
+    `- Build one exact ${size} frame.`,
+    '- Set `html, body { margin: 0; }` and global `box-sizing: border-box`.',
+    '- Normalize the selected root frame to `left: 0; top: 0`; root `layout.x/y` is only Figma canvas position.',
+    '',
+    '### Verification Loop',
+    '1. Implement the frame at the exact target size.',
+    '2. Capture a screenshot at that same size.',
+    '3. Compare it against the reference image.',
+    '4. Fix visible differences in position, size, color, typography, image crop, vector geometry, and z-order.',
+    '5. Repeat until the screenshot is visually indistinguishable.',
+    '',
+    'Do not approximate missing images, icons, logos, or text. If a required path or asset cannot be loaded, stop and ask for the correct input.',
+  ].join('\n');
+}
+
 // ── Main Prompt Builder ───────────────────────────────────
 
 export interface BuildPromptOptions {
   /** Per-node filename overrides applied to the Assets section */
   imageNameOverrides?: ImageNameOverrides;
+  /** Per-node image paths supplied by the user for mock-image based rebuilds */
+  mockImagePaths?: ImageNameOverrides;
   /** Merged composite reference — shown as a single whole-frame asset line */
   merged?: { name: string; width: number; height: number };
+  /** Prompt recipe: component rebuild or screenshot-driven pixel-perfect rebuild. */
+  promptTemplate?: PromptTemplate;
   /** Output depth: compact omits helper sections, full expands geometry. */
   promptDetail?: PromptDetailLevel;
 }
@@ -796,6 +840,7 @@ export interface BuildPromptOptions {
  * designed to let an AI reproduce the component at 99% fidelity.
  */
 export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions): string {
+  const promptTemplate = options?.promptTemplate ?? 'component';
   const promptDetail = options?.promptDetail ?? 'detailed';
   const tokens = collectTokens(node);
   const deps = collectComponentDeps(node);
@@ -804,11 +849,13 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
   const sections: string[] = [];
 
   // Header
-  sections.push(`# Component: ${node.name}`);
+  sections.push(promptTemplate === 'pixel-perfect'
+    ? `# Pixel-perfect Figma rebuild: ${node.name}`
+    : `# Component: ${node.name}`);
 
   // Guidelines
   sections.push(`## Guidelines
-- Reproduce this component with **99% fidelity** using the JSON spec below
+- Reproduce this component with ${promptTemplate === 'pixel-perfect' ? '**pixel-perfect visual fidelity**' : '**99% fidelity**'} using the JSON spec below
 - Use semantic HTML elements
 - The JSON contains the full node tree with layout, style, and children
 - Preserve JSON child order as paint order; later siblings render above earlier siblings
@@ -898,16 +945,19 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
   // rasterized into it and MUST NOT be referenced as separate files (they don't exist
   // as attachments). Per-image mode lists each image-fill node as its own asset.
   const merged = options?.merged;
+  let hasMockPaths = false;
   if (merged) {
     const mergedSafe = sanitizeFileName(merged.name);
     sections.push(
       `## Assets\nA single rendered composite image is attached — use it as a visual reference for the whole frame. Do NOT reference any individual image files; they are already baked into this composite:\n- \`${mergedSafe}.png\` → whole composite (${merged.width}×${merged.height})`,
     );
   } else {
-    const imageAssets = collectImageAssets(node, options?.imageNameOverrides);
+    const imageAssets = collectImageAssets(node, options?.imageNameOverrides, options?.mockImagePaths);
     if (imageAssets.length > 0) {
+      hasMockPaths = imageAssets.some((a) => a.mockPath);
       const assetLines = imageAssets.map((a) => {
-        let line = `- \`${a.fileName}\` → ${a.nodeName} (${a.width}×${a.height}`;
+        const target = a.mockPath ? `mock image \`${a.mockPath}\`` : `\`${a.fileName}\``;
+        let line = `- ${target} → ${a.nodeName} (${a.width}×${a.height}`;
         if (a.scaleMode) line += `, ${a.scaleMode}`;
         if (a.opacity !== undefined) line += `, opacity ${a.opacity}`;
         if (a.rotation !== undefined) line += `, rotation ${a.rotation}deg`;
@@ -917,10 +967,17 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
         line += ')';
         return line;
       });
+      const header = hasMockPaths
+        ? 'Image paths supplied by the user — use these exact paths for the matching image nodes. Do not invent, replace, or regenerate these images; if a listed path is unavailable, stop and ask for the correct path:'
+        : 'Image files included with this spec — use as `<img>` or CSS `background-image`:';
       sections.push(
-        `## Assets\nImage files included with this spec — use as \`<img>\` or CSS \`background-image\`:\n${assetLines.join('\n')}`,
+        `## Assets\n${header}\n${assetLines.join('\n')}`,
       );
     }
+  }
+
+  if (promptTemplate === 'pixel-perfect') {
+    sections.push(buildPixelPerfectTemplateSection(node, Boolean(merged), hasMockPaths));
   }
 
   if (promptDetail !== 'compact') {

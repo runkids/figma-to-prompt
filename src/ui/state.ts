@@ -1,5 +1,5 @@
 import { collectImageAssets } from './prompt';
-import type { ExportMode, ImageFormat, ImageNameOverrides, PromptDetailLevel, UISerializedNode } from '../shared/types';
+import type { ExportMode, ImageFormat, ImageNameOverrides, PromptDetailLevel, PromptTemplate, UISerializedNode } from '../shared/types';
 
 export type Tab = 'json' | 'prompt';
 type LossyImageFormat = Extract<ImageFormat, 'JPG' | 'WEBP' | 'AVIF'>;
@@ -13,6 +13,7 @@ export const AVIF_DEFAULT_QUALITY = 0.8;
 export interface State {
   data: UISerializedNode | null;
   tab: Tab;
+  promptTemplate: PromptTemplate;
   promptDetail: PromptDetailLevel;
   /** Truncate the extracted tree to this many levels deep. null = unlimited. */
   extractDepth: number | null;
@@ -34,6 +35,7 @@ export interface State {
   qualityByFormat: Partial<Record<LossyImageFormat, number>>;
   mode: ExportMode;
   nameOverrides: ImageNameOverrides;
+  mockImagePaths: ImageNameOverrides;
   mergedImageName: string;
   /** Bumped whenever we need sandbox to re-export. Observed by an effect that postMessages. */
   exportRequestId: number;
@@ -44,6 +46,7 @@ export interface State {
 export const initialState: State = {
   data: null,
   tab: 'json',
+  promptTemplate: 'component',
   promptDetail: 'detailed',
   extractDepth: null,
   images: {},
@@ -56,6 +59,7 @@ export const initialState: State = {
   qualityByFormat: {},
   mode: 'per-image',
   nameOverrides: {},
+  mockImagePaths: {},
   mergedImageName: '',
   exportRequestId: 0,
   protocolMismatch: false,
@@ -71,6 +75,7 @@ export type Action =
   /** Preview images ready for display. */
   | { type: 'IMAGES_RECEIVED'; images: Record<string, string>; merged?: string | null }
   | { type: 'TAB_CHANGED'; tab: Tab }
+  | { type: 'PROMPT_TEMPLATE_CHANGED'; promptTemplate: PromptTemplate }
   | { type: 'PROMPT_DETAIL_CHANGED'; promptDetail: PromptDetailLevel }
   | { type: 'EXTRACT_DEPTH_CHANGED'; extractDepth: number | null }
   | { type: 'MODE_CHANGED'; mode: ExportMode }
@@ -78,6 +83,7 @@ export type Action =
   | { type: 'FORMAT_CHANGED'; format: ImageFormat }
   | { type: 'QUALITY_CHANGED'; value: number }
   | { type: 'NAME_OVERRIDE_CHANGED'; id: string; value: string }
+  | { type: 'MOCK_IMAGE_PATH_CHANGED'; id: string; value: string }
   | { type: 'MERGED_NAME_CHANGED'; value: string }
   | { type: 'PROTOCOL_MISMATCH' }
   | { type: 'UPDATE_AVAILABLE'; version: string; url: string };
@@ -130,6 +136,7 @@ export function reducer(state: State, action: Action): State {
       return {
         ...initialState,
         tab: state.tab,
+        promptTemplate: state.promptTemplate,
         promptDetail: state.promptDetail,
         extractDepth: state.extractDepth,
         scale: state.scale,
@@ -161,6 +168,7 @@ export function reducer(state: State, action: Action): State {
         rawImages: {},
         rawMerged: null,
         nameOverrides: {},
+        mockImagePaths: {},
         mergedImageName: '',
         mode,
         scale,
@@ -178,6 +186,9 @@ export function reducer(state: State, action: Action): State {
 
     case 'TAB_CHANGED':
       return { ...state, tab: action.tab };
+
+    case 'PROMPT_TEMPLATE_CHANGED':
+      return { ...state, promptTemplate: action.promptTemplate };
 
     case 'PROMPT_DETAIL_CHANGED':
       return { ...state, promptDetail: action.promptDetail };
@@ -241,6 +252,13 @@ export function reducer(state: State, action: Action): State {
       if (action.value === '') delete overrides[action.id];
       else overrides[action.id] = action.value;
       return { ...state, nameOverrides: overrides };
+    }
+
+    case 'MOCK_IMAGE_PATH_CHANGED': {
+      const mockImagePaths = { ...state.mockImagePaths };
+      if (action.value.trim() === '') delete mockImagePaths[action.id];
+      else mockImagePaths[action.id] = action.value.trim();
+      return { ...state, mockImagePaths };
     }
 
     case 'MERGED_NAME_CHANGED':
