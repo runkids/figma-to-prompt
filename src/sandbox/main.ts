@@ -294,6 +294,38 @@ async function exportImages(
   figma.ui.postMessage(msg);
 }
 
+/** Per-selection export: render each top-level selected node as its own image.
+ *  Unlike per-image (which digs into the tree for image-fill nodes), this treats
+ *  every selection entry as an opaque renderable unit. */
+async function exportPerSelection(
+  scale: number,
+  format: 'PNG' | 'JPG' | 'SVG',
+  exportId: number,
+): Promise<void> {
+  const selection = figma.currentPage.selection;
+  if (selection.length === 0) return;
+
+  const effectiveScale = scale === 0 ? 1 : scale;
+  const mime = format === 'JPG' ? 'image/jpeg' : format === 'SVG' ? 'image/svg+xml' : 'image/png';
+  const images: Record<string, string> = {};
+
+  for (const node of selection) {
+    if (exportId !== currentExportId) return;
+    if (!('exportAsync' in node)) continue;
+    try {
+      const bytes = await (node as SceneNode).exportAsync({
+        format,
+        constraint: { type: 'SCALE' as const, value: effectiveScale },
+      });
+      images[node.id] = `data:${mime};base64,${uint8ArrayToBase64(bytes)}`;
+    } catch { /* skip */ }
+  }
+
+  if (exportId !== currentExportId) return;
+  const msg: SandboxMessage = { type: 'image-data', images };
+  figma.ui.postMessage(msg);
+}
+
 // ── Selection Handler ────────────────────────────────────
 
 function handleSelection(): void {
@@ -349,6 +381,8 @@ figma.ui.onmessage = (msg: UIMessage) => {
     const exportId = ++currentExportId;
     if (msg.mode === 'merged') {
       exportMerged(lastNormalized.id, msg.scale, msg.format, exportId);
+    } else if (msg.mode === 'per-selection') {
+      exportPerSelection(msg.scale, msg.format, exportId);
     } else {
       exportImages(lastNormalized, msg.scale, msg.format, exportId);
     }

@@ -262,8 +262,10 @@ export interface ImageDataMessage {
 
 export type SandboxMessage = ExportResultMessage | SelectionEmptyMessage | ImageDataMessage;
 
-/** Export mode: per-image splits each image-fill node; merged renders the whole selection as one composite image */
-export type ExportMode = 'per-image' | 'merged';
+/** Export mode: per-image splits each image-fill node; merged renders the whole
+ *  selection as one composite image; per-selection renders each top-level
+ *  selected layer as its own image. */
+export type ExportMode = 'per-image' | 'merged' | 'per-selection';
 
 /** User-supplied filename overrides. Key is node id, value is filename without extension.
  *  Empty string means "fall back to auto-generated name". */

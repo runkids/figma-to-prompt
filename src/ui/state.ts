@@ -94,7 +94,7 @@ export type Action =
  *  (no raster source). Previous rule forbade Orig for any non-PNG target; now
  *  relaxed because JPG / WEBP / AVIF are client-transcoded from the PNG raster. */
 function reconcileScale(scale: number, mode: ExportMode, format: ImageFormat): number {
-  const origForbidden = mode === 'merged' || format === 'SVG';
+  const origForbidden = mode === 'merged' || mode === 'per-selection' || format === 'SVG';
   return origForbidden && scale === 0 ? 1 : scale;
 }
 
@@ -152,11 +152,12 @@ export function reducer(state: State, action: Action): State {
       const { data } = action;
       const hasImages = collectImageAssets(data).length > 0;
       // Per-image mode is meaningless without image fills — force merged.
+      // Per-selection stays as-is regardless of image fills.
       const mode: ExportMode = !hasImages && state.mode === 'per-image' ? 'merged' : state.mode;
       const scale = reconcileScale(state.scale, mode, state.format);
       // Sandbox auto-triggers a per-image export on selection change. We only need to
-      // re-request when our local mode is merged (or was just forced to merged).
-      const needsRequest = mode === 'merged';
+      // re-request when our local mode needs a different export strategy.
+      const needsRequest = mode === 'merged' || mode === 'per-selection';
       // JSON / prompt text are derived lazily by CodePanel via useMemo so rapid
       // selection changes don't pay both JSON.stringify + buildPrompt eagerly
       // on every click. Only the active tab's string is ever computed.
