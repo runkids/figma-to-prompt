@@ -448,7 +448,7 @@ export function buildFidelityWarningsSection(node: UISerializedNode): string {
 // ── Image Assets ─────────────────────────────────────────
 
 export interface ImageAsset {
-  hash: string;
+  hash?: string;
   nodeId: string;
   fileName: string;
   mockPath?: string;
@@ -511,6 +511,43 @@ export function collectImageAssets(
       nameIdx.set(a.fileName, idx);
       a.fileName = a.fileName.replace(/\.png$/, `_${idx}.png`);
     }
+  }
+  return result;
+}
+
+export function collectSelectionAssets(
+  node: UISerializedNode,
+  overrides?: ImageNameOverrides,
+  mockImagePaths?: ImageNameOverrides,
+): ImageAsset[] {
+  const items = node.id === '__multi_selection__' && node.children
+    ? node.children.filter((c) => c.visible !== false)
+    : [node];
+
+  const result = items.map((child) => {
+    const override = overrides?.[child.id]?.trim();
+    const safeName = override ? sanitizeFileName(override) : sanitizeFileName(child.name);
+    return {
+      nodeId: child.id,
+      fileName: `${safeName}.png`,
+      mockPath: mockImagePaths?.[child.id]?.trim() || undefined,
+      nodeName: child.name,
+      width: Math.round(child.layout?.width ?? 0),
+      height: Math.round(child.layout?.height ?? 0),
+    } satisfies ImageAsset;
+  });
+
+  const usedNames = new Set<string>();
+  for (const a of result) {
+    const base = a.fileName.replace(/\.png$/, '');
+    let candidate = a.fileName;
+    let idx = 1;
+    while (usedNames.has(candidate)) {
+      candidate = `${base}_${idx}.png`;
+      idx++;
+    }
+    a.fileName = candidate;
+    usedNames.add(candidate);
   }
   return result;
 }
@@ -829,6 +866,8 @@ export interface BuildPromptOptions {
   mockImagePaths?: ImageNameOverrides;
   /** Merged composite reference — shown as a single whole-frame asset line */
   merged?: { name: string; width: number; height: number };
+  /** When true, assets are per-selection layers instead of per-image-fill. */
+  perSelection?: boolean;
   /** Prompt recipe: component rebuild or screenshot-driven pixel-perfect rebuild. */
   promptTemplate?: PromptTemplate;
   /** Output depth: compact omits helper sections, full expands geometry. */
@@ -944,6 +983,7 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
   // Merged mode: only the composite is attached; individual image fills are already
   // rasterized into it and MUST NOT be referenced as separate files (they don't exist
   // as attachments). Per-image mode lists each image-fill node as its own asset.
+  // Per-selection mode lists each selected layer as its own rendered image.
   const merged = options?.merged;
   let hasMockPaths = false;
   if (merged) {
@@ -951,6 +991,19 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
     sections.push(
       `## Assets\nA single rendered composite image is attached — use it as a visual reference for the whole frame. Do NOT reference any individual image files; they are already baked into this composite:\n- \`${mergedSafe}.png\` → whole composite (${merged.width}×${merged.height})`,
     );
+  } else if (options?.perSelection) {
+    const selAssets = collectSelectionAssets(node, options?.imageNameOverrides, options?.mockImagePaths);
+    if (selAssets.length > 0) {
+      hasMockPaths = selAssets.some((a) => a.mockPath);
+      const assetLines = selAssets.map((a) => {
+        const target = a.mockPath ? `mock image \`${a.mockPath}\`` : `\`${a.fileName}\``;
+        return `- ${target} → ${a.nodeName} (${a.width}×${a.height})`;
+      });
+      const header = hasMockPaths
+        ? 'Image paths supplied by the user — use these exact paths for the matching layers:'
+        : 'Each selected layer is exported as a separate rendered image:';
+      sections.push(`## Assets\n${header}\n${assetLines.join('\n')}`);
+    }
   } else {
     const imageAssets = collectImageAssets(node, options?.imageNameOverrides, options?.mockImagePaths);
     if (imageAssets.length > 0) {

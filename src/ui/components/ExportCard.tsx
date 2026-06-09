@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { Action, State } from '../state';
 import type { ExportMode, ImageFormat } from '../../shared/types';
-import { type ImageAsset, collectImageAssets, sanitizeFileName } from '../prompt';
+import { type ImageAsset, collectImageAssets, collectSelectionAssets, sanitizeFileName } from '../prompt';
 import {
   copyToClipboard,
   mergedExt,
@@ -30,6 +30,7 @@ interface Props {
 
 const MODE_OPTIONS = [
   { value: 'per-image' as ExportMode, label: 'Each image' },
+  { value: 'per-selection' as ExportMode, label: 'Each layer' },
   { value: 'merged' as ExportMode, label: 'Whole frame' },
 ];
 
@@ -419,7 +420,10 @@ function collectSvgCopySources(state: State): SvgCopySource[] {
     return [{ name: `${base}.svg`, dataUrl: source }];
   }
 
-  return collectImageAssets(state.data, state.nameOverrides)
+  const assetList = state.mode === 'per-selection'
+    ? collectSelectionAssets(state.data, state.nameOverrides)
+    : collectImageAssets(state.data, state.nameOverrides);
+  return assetList
     .map((asset) => {
       const source = state.rawImages[asset.nodeId] ?? state.images[asset.nodeId];
       return source && isSvgDataUrl(source)
@@ -616,7 +620,9 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
         feedbackCount = 1;
       } else {
         if (Object.keys(state.images).length === 0) return;
-        const namedAssets = collectImageAssets(state.data, state.nameOverrides);
+        const namedAssets = state.mode === 'per-selection'
+          ? collectSelectionAssets(state.data, state.nameOverrides)
+          : collectImageAssets(state.data, state.nameOverrides);
         const perFile: { name: string; data: Uint8Array }[] = [];
 
         for (const asset of namedAssets) {
@@ -691,8 +697,12 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
 
 // ── ExportCard root ────────────────────────────────────
 export function ExportCard({ state, dispatch }: Props) {
-  // One tree walk per selection, shared with PreviewArea / RenamesList / DownloadButton.
-  const assets = useMemo(() => (state.data ? collectImageAssets(state.data) : []), [state.data]);
+  const imageAssets = useMemo(() => (state.data ? collectImageAssets(state.data) : []), [state.data]);
+  const assets = useMemo(() => {
+    if (!state.data) return [];
+    if (state.mode === 'per-selection') return collectSelectionAssets(state.data);
+    return imageAssets;
+  }, [state.data, state.mode, imageAssets]);
 
   // Folder-picker state is local to this card — the reducer doesn't care where
   // files land. `useMemo` pins the capability check (stable for the session).
@@ -722,9 +732,9 @@ export function ExportCard({ state, dispatch }: Props) {
   // "Orig" disabled in merged or SVG (mirrors reconcileScale in state.ts). JPG /
   // WebP / AVIF CAN use Orig now because the sandbox still delivers a PNG
   // raster via getImageByHash and the UI transcodes it client-side.
-  const origForbidden = state.mode === 'merged' || state.format === 'SVG';
+  const origForbidden = state.mode === 'merged' || state.mode === 'per-selection' || state.format === 'SVG';
   const scaleOptions = SCALE_OPTIONS.map((o) => ({ ...o, disabled: o.value === '0' && origForbidden }));
-  const modeOptions = MODE_OPTIONS.map((o) => ({ ...o, disabled: o.value === 'per-image' && assets.length === 0 }));
+  const modeOptions = MODE_OPTIONS.map((o) => ({ ...o, disabled: o.value === 'per-image' && imageAssets.length === 0 }));
   const showQuality = LOSSY_FORMATS.has(state.format);
 
   const namesToggleText = state.mode === 'merged'

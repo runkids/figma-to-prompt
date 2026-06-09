@@ -237,6 +237,7 @@ export function App() {
       imageNameOverrides: state.nameOverrides,
       mockImagePaths: state.mockImagePaths,
       merged,
+      perSelection: state.mode === 'per-selection',
       promptTemplate: state.promptTemplate,
       promptDetail: state.promptDetail,
     });
