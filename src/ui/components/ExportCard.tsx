@@ -22,6 +22,12 @@ import {
 import { loadDirHandle, saveDirHandle } from '../storage';
 import { ButtonGroup } from './ButtonGroup';
 import { HelpTip } from './HelpTip';
+import {
+  createDesignCaptureBundle,
+  requestCaptureReference,
+} from '../designCapture';
+
+declare const __APP_VERSION__: string;
 
 interface Props {
   state: State;
@@ -695,6 +701,45 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
   );
 }
 
+function DownloadCaptureButton({ state }: { state: State }) {
+  const [saving, setSaving] = useState(false);
+  const [feedback, flash] = useFeedback<'saved' | 'failed'>();
+  const disabled = !state.data || saving;
+
+  async function handleClick() {
+    if (!state.data || saving) return;
+    setSaving(true);
+    try {
+      const capture = await requestCaptureReference(state.data);
+      const bundle = await createDesignCaptureBundle({
+        root: state.data,
+        capture,
+        producerVersion: __APP_VERSION__,
+      });
+      downloadBlob(bundle.filename, bundle.blob);
+      flash('saved');
+    } catch {
+      flash('failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const label = saving
+    ? 'Capturing…'
+    : feedback === 'saved'
+      ? 'Capture saved!'
+      : feedback === 'failed'
+        ? 'Capture failed'
+        : 'Download capture';
+
+  return (
+    <button type="button" class="btn-secondary" disabled={disabled} onClick={handleClick}>
+      {label}
+    </button>
+  );
+}
+
 // ── ExportCard root ────────────────────────────────────
 export function ExportCard({ state, dispatch }: Props) {
   const imageAssets = useMemo(() => (state.data ? collectImageAssets(state.data) : []), [state.data]);
@@ -811,6 +856,7 @@ export function ExportCard({ state, dispatch }: Props) {
       ) : (
         <DownloadButton state={state} dirHandle={dirHandle} fsaSupported={fsaSupported} />
       )}
+      <DownloadCaptureButton state={state} />
     </section>
   );
 }

@@ -326,6 +326,84 @@ async function exportPerSelection(
   figma.ui.postMessage(msg);
 }
 
+function topLevelNodeIds(root: UISerializedNode): string[] {
+  return root.id === SYNTHETIC_MULTI_ID
+    ? (root.children ?? []).map((child) => child.id)
+    : [root.id];
+}
+
+async function exportNodePng(nodeId: string): Promise<string | null> {
+  const node = figma.getNodeById(nodeId);
+  if (!node || !('exportAsync' in node)) return null;
+  try {
+    const bytes = await (node as SceneNode).exportAsync({
+      format: 'PNG',
+      constraint: { type: 'SCALE', value: 1 },
+    });
+    return `data:image/png;base64,${uint8ArrayToBase64(bytes)}`;
+  } catch {
+    return null;
+  }
+}
+
+async function exportCapture(
+  request: Extract<UIMessage, { type: 'export-capture' }>,
+): Promise<void> {
+  const warnings: string[] = [];
+  const actualNodeIds = lastNormalized ? topLevelNodeIds(lastNormalized) : [];
+  const selectionMatches =
+    lastNormalized?.id === request.rootId &&
+    actualNodeIds.length === request.nodeIds.length &&
+    actualNodeIds.every((nodeId, index) => nodeId === request.nodeIds[index]);
+
+  if (!lastNormalized || !selectionMatches) {
+    figma.ui.postMessage({
+      type: 'capture-reference-data',
+      protocolVersion: PROTOCOL_VERSION,
+      requestId: request.requestId,
+      rootId: request.rootId,
+      nodeIds: request.nodeIds,
+      fileKey: figma.fileKey ?? null,
+      sourceUrl: null,
+      references: {},
+      assets: {},
+      warnings: ['The Figma selection changed before capture started.'],
+    } satisfies SandboxMessage);
+    return;
+  }
+
+  const references: Record<string, string> = {};
+  for (const nodeId of request.nodeIds) {
+    const dataUrl = await exportNodePng(nodeId);
+    if (dataUrl) references[nodeId] = dataUrl;
+    else warnings.push(`Unable to render selected node ${nodeId}.`);
+  }
+
+  const assets: Record<string, string> = {};
+  for (const image of collectImageNodes(lastNormalized)) {
+    const dataUrl = await exportNodePng(image.id);
+    if (dataUrl) assets[image.id] = dataUrl;
+    else warnings.push(`Unable to render design asset ${image.id}.`);
+  }
+
+  const fileKey = figma.fileKey ?? null;
+  const sourceUrl = fileKey
+    ? `https://www.figma.com/file/${fileKey}?node-id=${encodeURIComponent(request.nodeIds[0] ?? request.rootId)}`
+    : null;
+  figma.ui.postMessage({
+    type: 'capture-reference-data',
+    protocolVersion: PROTOCOL_VERSION,
+    requestId: request.requestId,
+    rootId: request.rootId,
+    nodeIds: request.nodeIds,
+    fileKey,
+    sourceUrl,
+    references,
+    assets,
+    warnings,
+  } satisfies SandboxMessage);
+}
+
 // ── Selection Handler ────────────────────────────────────
 
 function handleSelection(): void {
@@ -377,7 +455,9 @@ function handleSelection(): void {
 
 // UI → Sandbox: handle scale/format/mode change requests
 figma.ui.onmessage = (msg: UIMessage) => {
-  if (msg.type === 'export-images' && lastNormalized) {
+  if (msg.type === 'export-capture') {
+    void exportCapture(msg);
+  } else if (msg.type === 'export-images' && lastNormalized) {
     const exportId = ++currentExportId;
     if (msg.mode === 'merged') {
       exportMerged(lastNormalized.id, msg.scale, msg.format, exportId);

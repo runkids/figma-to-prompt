@@ -1,0 +1,54 @@
+{
+  "manifest": {
+    "schemaVersion": "1.0",
+    "producer": {
+      "name": "runkids/figma-to-prompt",
+      "version": "0.2.0",
+      "protocolVersion": 1
+    },
+    "capturedAt": "2026-07-15T00:00:00.000Z",
+    "source": {
+      "provider": "figma-plugin",
+      "fileKey": null,
+      "fileVersionId": null,
+      "nodeIds": ["1:23"],
+      "sourceUrl": null
+    },
+    "root": {
+      "id": "1:23",
+      "name": "Header",
+      "structurePath": "design/nodes.json",
+      "referencePaths": ["references/header.png"]
+    },
+    "files": [
+      {
+        "path": "design/nodes.json",
+        "role": "design-structure",
+        "mediaType": "application/json",
+        "size": 58,
+        "sha256": "aa598d30b57928211353e593047de76b3d9d441f6caa07ab4beb03ffd27a6dd2",
+        "nodeId": "1:23"
+      },
+      {
+        "path": "references/header.png",
+        "role": "reference-render",
+        "mediaType": "image/png",
+        "size": 68,
+        "sha256": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+        "nodeId": "1:23"
+      }
+    ],
+    "warnings": ["Figma file version is unavailable in the plugin sandbox."],
+    "provenance": { "selectionCount": 1 }
+  },
+  "files": {
+    "design/nodes.json": {
+      "encoding": "utf8",
+      "data": "{\"id\":\"1:23\",\"name\":\"Header\",\"type\":\"FRAME\",\"children\":[]}"
+    },
+    "references/header.png": {
+      "encoding": "base64",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    }
+  }
+}

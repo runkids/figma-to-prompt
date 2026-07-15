@@ -1,0 +1,11 @@
+[
+  { "name": "invalid-digest", "mutation": "digest" },
+  { "name": "invalid-path", "mutation": "path" },
+  { "name": "invalid-missing-reference", "mutation": "missing-reference" },
+  { "name": "invalid-unsupported-major", "mutation": "unsupported-major" },
+  { "name": "invalid-size", "mutation": "size" },
+  { "name": "invalid-media", "mutation": "media" },
+  { "name": "invalid-undeclared", "mutation": "undeclared" },
+  { "name": "invalid-link", "mutation": "link" },
+  { "name": "invalid-compression-bomb", "mutation": "bomb" }
+]

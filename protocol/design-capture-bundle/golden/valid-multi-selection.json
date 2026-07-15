@@ -1,0 +1,54 @@
+{
+  "manifest": {
+    "schemaVersion": "1.0",
+    "producer": {
+      "name": "runkids/figma-to-prompt",
+      "version": "0.2.0",
+      "protocolVersion": 1
+    },
+    "capturedAt": "2026-07-15T00:00:00.000Z",
+    "source": {
+      "provider": "figma-plugin",
+      "fileKey": null,
+      "fileVersionId": null,
+      "nodeIds": ["1:23", "2:34"],
+      "sourceUrl": null
+    },
+    "root": {
+      "id": "__multi_selection__",
+      "name": "Selection",
+      "structurePath": "design/nodes.json",
+      "referencePaths": ["references/selection.png"]
+    },
+    "files": [
+      {
+        "path": "design/nodes.json",
+        "role": "design-structure",
+        "mediaType": "application/json",
+        "size": 195,
+        "sha256": "333369a58f454933f285dac26a3e7e06a3802458f4be501f4c2267311e3600e9",
+        "nodeId": "__multi_selection__"
+      },
+      {
+        "path": "references/selection.png",
+        "role": "reference-render",
+        "mediaType": "image/png",
+        "size": 68,
+        "sha256": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+        "nodeId": "__multi_selection__"
+      }
+    ],
+    "warnings": ["Figma file version is unavailable in the plugin sandbox."],
+    "provenance": { "selectionCount": 2 }
+  },
+  "files": {
+    "design/nodes.json": {
+      "encoding": "utf8",
+      "data": "{\"id\":\"__multi_selection__\",\"name\":\"Selection\",\"type\":\"SECTION\",\"children\":[{\"id\":\"1:23\",\"name\":\"Header\",\"type\":\"FRAME\",\"children\":[]},{\"id\":\"2:34\",\"name\":\"Footer\",\"type\":\"FRAME\",\"children\":[]}]}"
+    },
+    "references/selection.png": {
+      "encoding": "base64",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    }
+  }
+}

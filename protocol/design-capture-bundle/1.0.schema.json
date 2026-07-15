@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unnotech.dev/schemas/design-capture-bundle/1.0.schema.json",
+  "title": "Design Capture Bundle manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "producer",
+    "capturedAt",
+    "source",
+    "root",
+    "files"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "producer": {
+      "type": "object",
+      "required": ["name", "version", "protocolVersion"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "protocolVersion": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "capturedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "provider",
+        "fileKey",
+        "fileVersionId",
+        "nodeIds",
+        "sourceUrl"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["figma-plugin", "figma-mcp", "figma-rest", "manual"]
+        },
+        "fileKey": { "type": ["string", "null"], "maxLength": 500 },
+        "fileVersionId": { "type": ["string", "null"], "maxLength": 500 },
+        "nodeIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        },
+        "sourceUrl": {
+          "type": ["string", "null"],
+          "format": "uri",
+          "maxLength": 4000
+        }
+      },
+      "additionalProperties": true
+    },
+    "root": {
+      "type": "object",
+      "required": ["id", "name", "structurePath", "referencePaths"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "structurePath": { "const": "design/nodes.json" },
+        "referencePaths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        }
+      },
+      "additionalProperties": true
+    },
+    "files": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "required": ["path", "role", "mediaType", "size", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "role": {
+            "type": "string",
+            "enum": [
+              "design-structure",
+              "reference-render",
+              "design-asset",
+              "derived-prompt",
+              "provenance"
+            ]
+          },
+          "mediaType": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "size": { "type": "integer", "minimum": 0, "maximum": 134217728 },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "nodeId": { "type": ["string", "null"], "maxLength": 500 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "type": "string", "maxLength": 2000 }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -260,7 +260,24 @@ export interface ImageDataMessage {
   };
 }
 
-export type SandboxMessage = ExportResultMessage | SelectionEmptyMessage | ImageDataMessage;
+export interface CaptureReferenceDataMessage {
+  type: 'capture-reference-data';
+  protocolVersion: number;
+  requestId: string;
+  rootId: string;
+  nodeIds: string[];
+  fileKey: string | null;
+  sourceUrl: string | null;
+  references: Record<string, string>;
+  assets: Record<string, string>;
+  warnings: string[];
+}
+
+export type SandboxMessage =
+  | ExportResultMessage
+  | SelectionEmptyMessage
+  | ImageDataMessage
+  | CaptureReferenceDataMessage;
 
 /** Export mode: per-image splits each image-fill node; merged renders the whole
  *  selection as one composite image; per-selection renders each top-level
@@ -289,4 +306,11 @@ export interface ExportImagesMessage {
   mode: ExportMode;
 }
 
-export type UIMessage = ExportImagesMessage;
+export interface ExportCaptureMessage {
+  type: 'export-capture';
+  requestId: string;
+  rootId: string;
+  nodeIds: string[];
+}
+
+export type UIMessage = ExportImagesMessage | ExportCaptureMessage;
