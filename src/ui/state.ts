@@ -1,14 +1,14 @@
 import { collectImageAssets } from './prompt';
-import type { ExportMode, ImageFormat, ImageNameOverrides, PromptDetailLevel, PromptTemplate, UISerializedNode } from '../shared/types';
+import { MIN_SHARP_RASTER_SCALE } from '../shared/rasterScale';
+import type { ExportMode, ImageFormat, ImageNameOverrides, ImageSourceRasterEvidence, PromptDetailLevel, PromptTemplate, UISerializedNode } from '../shared/types';
 
 export type Tab = 'json' | 'prompt';
 type LossyImageFormat = Extract<ImageFormat, 'JPG' | 'WEBP' | 'AVIF'>;
 
-/** Default canvas.toBlob quality. 0.92 is the browser's native default and
- *  keeps JPG output roughly on par with Figma's own encoder; users can slide
- *  down toward 0.3 for smaller files. */
-export const DEFAULT_QUALITY = 0.92;
-export const AVIF_DEFAULT_QUALITY = 0.8;
+/** Fidelity-first defaults. Lossy formats still cannot guarantee exact pixels,
+ *  but they should not silently start with additional quality reduction. */
+export const DEFAULT_QUALITY = 1;
+export const AVIF_DEFAULT_QUALITY = 1;
 
 export interface State {
   data: UISerializedNode | null;
@@ -26,6 +26,8 @@ export interface State {
    *  ExportCard reads it again for download-time encoding. */
   rawImages: Record<string, string>;
   rawMerged: string | null;
+  sourceRasterEvidence: Record<string, ImageSourceRasterEvidence>;
+  imageExportPending: boolean;
   scale: number; // 0 = original (getImageByHash), 1..4 = px multiplier
   format: ImageFormat;
   /** Active canvas.toBlob quality for lossy formats. Ignored for PNG and SVG. */
@@ -45,19 +47,21 @@ export interface State {
 
 export const initialState: State = {
   data: null,
-  tab: 'json',
-  promptTemplate: 'component',
-  promptDetail: 'detailed',
+  tab: 'prompt',
+  promptTemplate: 'pixel-perfect',
+  promptDetail: 'full',
   extractDepth: null,
   images: {},
   mergedImage: null,
   rawImages: {},
   rawMerged: null,
-  scale: 0,
+  sourceRasterEvidence: {},
+  imageExportPending: false,
+  scale: 2,
   format: 'PNG',
   quality: DEFAULT_QUALITY,
   qualityByFormat: {},
-  mode: 'per-image',
+  mode: 'merged',
   nameOverrides: {},
   mockImagePaths: {},
   mergedImageName: '',
@@ -71,7 +75,12 @@ export type Action =
   | { type: 'SELECTION_RECEIVED'; data: UISerializedNode }
   /** Sandbox delivered fresh PNG / SVG source data. App.tsx mirrors this into
    *  preview state; download-time encoding still reads the raw copy. */
-  | { type: 'RAW_IMAGES_RECEIVED'; images: Record<string, string>; merged?: string | null }
+  | {
+      type: 'RAW_IMAGES_RECEIVED';
+      images: Record<string, string>;
+      merged?: string | null;
+      sourceRasterEvidence?: Record<string, ImageSourceRasterEvidence>;
+    }
   /** Preview images ready for display. */
   | { type: 'IMAGES_RECEIVED'; images: Record<string, string>; merged?: string | null }
   | { type: 'TAB_CHANGED'; tab: Tab }
@@ -88,14 +97,12 @@ export type Action =
   | { type: 'PROTOCOL_MISMATCH' }
   | { type: 'UPDATE_AVAILABLE'; version: string; url: string };
 
-/** Orig (scale=0) pulls the uploaded raster via getImageByHash — always a PNG
- *  single image. That's compatible with any raster target (we transcode PNG
- *  client-side), but meaningless for merged exports (need exportAsync) and SVG
- *  (no raster source). Previous rule forbade Orig for any non-PNG target; now
- *  relaxed because JPG / WEBP / AVIF are client-transcoded from the PNG raster. */
+/** Orig (scale=0) returns uploaded pixels when possible and a source-aware PNG
+ *  render for paint-specific variants. It is meaningless for merged exports
+ *  and SVG, so those transitions use the sharp raster default instead. */
 function reconcileScale(scale: number, mode: ExportMode, format: ImageFormat): number {
   const origForbidden = mode === 'merged' || mode === 'per-selection' || format === 'SVG';
-  return origForbidden && scale === 0 ? 1 : scale;
+  return origForbidden && scale === 0 ? MIN_SHARP_RASTER_SCALE : scale;
 }
 
 /** Sandbox re-export is only required when the Figma-native format actually
@@ -168,6 +175,8 @@ export function reducer(state: State, action: Action): State {
         mergedImage: null,
         rawImages: {},
         rawMerged: null,
+        sourceRasterEvidence: {},
+        imageExportPending: true,
         nameOverrides: {},
         mockImagePaths: {},
         mergedImageName: '',
@@ -180,7 +189,13 @@ export function reducer(state: State, action: Action): State {
     case 'RAW_IMAGES_RECEIVED':
       // Sandbox delivered the Figma-native source. App.tsx mirrors this into
       // display state; ExportCard handles expensive lossy encoding on Download.
-      return { ...state, rawImages: action.images, rawMerged: action.merged ?? null };
+      return {
+        ...state,
+        rawImages: action.images,
+        rawMerged: action.merged ?? null,
+        sourceRasterEvidence: action.sourceRasterEvidence ?? {},
+        imageExportPending: false,
+      };
 
     case 'IMAGES_RECEIVED':
       return { ...state, images: action.images, mergedImage: action.merged ?? null };
@@ -208,6 +223,7 @@ export function reducer(state: State, action: Action): State {
         ...state,
         mode,
         scale,
+        imageExportPending: Boolean(state.data),
         exportRequestId: state.data ? state.exportRequestId + 1 : state.exportRequestId,
       };
     }
@@ -218,6 +234,7 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         scale: action.scale,
+        imageExportPending: Boolean(state.data),
         exportRequestId: state.data ? state.exportRequestId + 1 : state.exportRequestId,
       };
 
@@ -233,6 +250,7 @@ export function reducer(state: State, action: Action): State {
         format,
         scale,
         quality: qualityForFormat(format, state.qualityByFormat),
+        imageExportPending: refetch && state.data ? true : state.imageExportPending,
         exportRequestId:
           refetch && state.data ? state.exportRequestId + 1 : state.exportRequestId,
       };

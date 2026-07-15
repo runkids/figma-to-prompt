@@ -1,13 +1,21 @@
 import type {
   UIFidelityWarning,
   UIImageFilters,
+  UIJsonValue,
   UILayout,
   UINodeType,
   UIPaint,
+  UIPrototypeAction,
+  UIPrototypeReaction,
+  UIPrototypeTrigger,
   UISerializedNode,
   UIStyle,
   UITextStyleRange,
   UITransform,
+  UIVariableBinding,
+  UIVariableDefinition,
+  UIVariableMode,
+  UIVariableReference,
   UIVectorPath,
 } from '@shared/types';
 import { rgbaToHex, normalizeLineHeight } from './normalizer';
@@ -15,7 +23,7 @@ import { rgbaToHex, normalizeLineHeight } from './normalizer';
 // Types that we know how to fully extract
 const CONTAINER_TYPES = new Set<string>(['FRAME', 'COMPONENT', 'COMPONENT_SET', 'SECTION', 'BOOLEAN_OPERATION']);
 const LEAF_TYPES = new Set<string>(['TEXT', 'RECTANGLE', 'ELLIPSE', 'LINE', 'VECTOR', 'POLYGON', 'STAR']);
-const GROUP_TYPES = new Set<string>(['GROUP']);
+const GROUP_TYPES = new Set<string>(['GROUP', 'TRANSFORM_GROUP']);
 const INSTANCE_TYPE = 'INSTANCE';
 
 // Only emit raw path data for nodes whose shape cannot be reconstructed from
@@ -27,6 +35,7 @@ const VECTOR_GEOMETRY_TYPES = new Set<string>([
   'STAR',
   'POLYGON',
   'LINE',
+  'TEXT_PATH',
 ]);
 
 interface FillPaint {
@@ -40,6 +49,24 @@ interface FillPaint {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyNode = Record<string, any>;
+
+/**
+ * Figma host nodes throw when a property is not implemented by that node type.
+ * Extraction intentionally probes a broad cross-node surface, so expose those
+ * unsupported getters as `undefined` while preserving method receivers.
+ */
+function safelyReadableNode(source: AnyNode): AnyNode {
+  return new Proxy(source, {
+    get(target, property) {
+      try {
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      } catch {
+        return undefined;
+      }
+    },
+  });
+}
 
 function firstSolidFill(fills: FillPaint[]): FillPaint | undefined {
   if (!Array.isArray(fills)) return undefined;
@@ -109,6 +136,67 @@ function extractVectorData(node: AnyNode): Pick<UISerializedNode, 'vectorPaths' 
   return vectorData;
 }
 
+function extractArcData(value: unknown): UISerializedNode['arcData'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const arc = value as Record<string, unknown>;
+  if (
+    typeof arc.startingAngle !== 'number' ||
+    typeof arc.endingAngle !== 'number' ||
+    typeof arc.innerRadius !== 'number'
+  ) {
+    return undefined;
+  }
+  return {
+    startingAngle: arc.startingAngle,
+    endingAngle: arc.endingAngle,
+    innerRadius: arc.innerRadius,
+  };
+}
+
+function extractTextPathStartData(
+  value: unknown,
+): UISerializedNode['textPathStartData'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const start = value as Record<string, unknown>;
+  if (typeof start.segment !== 'number' || typeof start.position !== 'number') return undefined;
+  return { segment: start.segment, position: start.position };
+}
+
+function extractTransformModifiers(
+  value: unknown,
+): UISerializedNode['transformModifiers'] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const modifiers = value.flatMap((item) => {
+    const modifier = item as Record<string, unknown>;
+    if (
+      modifier.type !== 'REPEAT' ||
+      (modifier.repeatType !== 'LINEAR' && modifier.repeatType !== 'RADIAL') ||
+      typeof modifier.count !== 'number' ||
+      typeof modifier.offset !== 'number'
+    ) return [];
+    const unitType = modifier.unitType === 'PIXELS'
+      ? 'px' as const
+      : modifier.unitType === 'RELATIVE'
+        ? 'relative' as const
+        : undefined;
+    if (!unitType) return [];
+    const axis = modifier.axis === 'HORIZONTAL'
+      ? 'horizontal' as const
+      : modifier.axis === 'VERTICAL'
+        ? 'vertical' as const
+        : undefined;
+    return [{
+      type: 'repeat' as const,
+      repeatType: modifier.repeatType.toLowerCase() as 'linear' | 'radial',
+      count: modifier.count,
+      unitType,
+      offset: modifier.offset,
+      ...(axis ? { axis } : {}),
+    }];
+  });
+  return modifiers.length > 0 ? modifiers : undefined;
+}
+
 function normalizeEnumValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value.toLowerCase().replace(/_/g, '-') : undefined;
 }
@@ -139,6 +227,70 @@ function resolveVariableName(variableId: string): string | undefined {
 function resolveVariableAliasName(alias: unknown): string | undefined {
   const variableId = (alias as { id?: unknown } | undefined)?.id;
   return typeof variableId === 'string' ? resolveVariableName(variableId) : undefined;
+}
+
+function extractVariableReference(value: unknown): UIVariableReference | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const id = (value as Record<string, unknown>).id;
+  if (typeof id !== 'string') return undefined;
+  const name = resolveVariableName(id);
+  return { id, ...(name ? { name } : {}) };
+}
+
+function extractVariableBindings(value: unknown): Record<string, UIVariableBinding> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const bindings: Record<string, UIVariableBinding> = {};
+
+  for (const [field, rawBinding] of Object.entries(value)) {
+    const single = extractVariableReference(rawBinding);
+    if (single) {
+      bindings[field] = single;
+      continue;
+    }
+
+    if (Array.isArray(rawBinding)) {
+      const references = rawBinding.flatMap((item) => {
+        const reference = extractVariableReference(item);
+        return reference ? [reference] : [];
+      });
+      if (references.length > 0) bindings[field] = references;
+      continue;
+    }
+
+    if (rawBinding && typeof rawBinding === 'object') {
+      const references: Record<string, UIVariableReference> = {};
+      for (const [key, nestedBinding] of Object.entries(rawBinding)) {
+        const reference = extractVariableReference(nestedBinding);
+        if (reference) references[cleanComponentPropertyName(key)] = reference;
+      }
+      if (Object.keys(references).length > 0) bindings[field] = references;
+    }
+  }
+
+  return Object.keys(bindings).length > 0 ? bindings : undefined;
+}
+
+function extractExplicitVariableModes(value: unknown): UIVariableMode[] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const modes = Object.entries(value).flatMap(([collectionId, modeId]): UIVariableMode[] => {
+    if (typeof modeId !== 'string') return [];
+    let collectionName: string | undefined;
+    let modeName: string | undefined;
+    if (typeof figma !== 'undefined' && figma.variables) {
+      try {
+        const collection = figma.variables.getVariableCollectionById(collectionId);
+        collectionName = collection?.name;
+        modeName = collection?.modes.find((mode) => mode.modeId === modeId)?.name;
+      } catch { /* preserve IDs when the collection is unavailable */ }
+    }
+    return [{
+      collectionId,
+      ...(collectionName ? { collectionName } : {}),
+      modeId,
+      ...(modeName ? { modeName } : {}),
+    }];
+  });
+  return modes.length > 0 ? modes : undefined;
 }
 
 /** Resolve a Figma style ID to its style name */
@@ -360,6 +512,9 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
   if (typeof node.cornerRadius === 'number' && node.cornerRadius > 0) {
     style.borderRadius = node.cornerRadius;
   }
+  if (typeof node.cornerSmoothing === 'number' && node.cornerSmoothing > 0) {
+    style.cornerSmoothing = node.cornerSmoothing;
+  }
 
   // Strokes
   const strokes: FillPaint[] = node.strokes ?? [];
@@ -468,6 +623,55 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
     }));
   if (blurEffects.length > 0) style.blurEffects = blurEffects;
 
+  const advancedEffects: NonNullable<UIStyle['advancedEffects']> = effects.flatMap(
+    (effect): NonNullable<UIStyle['advancedEffects']> => {
+    if (effect.visible === false) return [];
+    if (effect.type === 'NOISE' && effect.color) {
+      const noiseType = normalizeEnumValue(effect.noiseType);
+      if (noiseType !== 'monotone' && noiseType !== 'duotone' && noiseType !== 'multitone') return [];
+      return [{
+        type: 'noise' as const,
+        noiseType,
+        color: rgbaToHex({ ...effect.color, a: effect.color.a ?? 1 }),
+        ...(typeof effect.color.a === 'number' && effect.color.a < 1
+          ? { colorOpacity: effect.color.a }
+          : {}),
+        ...(effect.secondaryColor
+          ? { secondaryColor: rgbaToHex({ ...effect.secondaryColor, a: effect.secondaryColor.a ?? 1 }) }
+          : {}),
+        ...(typeof effect.secondaryColor?.a === 'number' && effect.secondaryColor.a < 1
+          ? { secondaryColorOpacity: effect.secondaryColor.a }
+          : {}),
+        ...(typeof effect.opacity === 'number' ? { opacity: effect.opacity } : {}),
+        ...(paintBlendMode(effect) ? { blendMode: paintBlendMode(effect) } : {}),
+        noiseSize: effect.noiseSize ?? 0,
+        density: effect.density ?? 0,
+      }];
+    }
+    if (effect.type === 'TEXTURE') {
+      return [{
+        type: 'texture' as const,
+        noiseSize: effect.noiseSize ?? 0,
+        radius: effect.radius ?? 0,
+        clipToShape: effect.clipToShape === true,
+      }];
+    }
+    if (effect.type === 'GLASS') {
+      return [{
+        type: 'glass' as const,
+        lightIntensity: effect.lightIntensity ?? 0,
+        lightAngle: effect.lightAngle ?? 0,
+        refraction: effect.refraction ?? 0,
+        depth: effect.depth ?? 0,
+        dispersion: effect.dispersion ?? 0,
+        radius: effect.radius ?? 0,
+      }];
+    }
+      return [];
+    },
+  );
+  if (advancedEffects.length > 0) style.advancedEffects = advancedEffects;
+
   // Image fill
   if (!isText) {
     const imageFill = Array.isArray(fills)
@@ -555,12 +759,19 @@ function extractTextStyleRanges(node: AnyNode): UITextStyleRange[] | undefined {
       'fontName',
       'fontSize',
       'fontWeight',
+      'openTypeFeatures',
       'lineHeight',
+      'leadingTrim',
       'letterSpacing',
       'fills',
       'textStyleId',
       'fillStyleId',
       'textDecoration',
+      'textDecorationStyle',
+      'textDecorationOffset',
+      'textDecorationThickness',
+      'textDecorationColor',
+      'textDecorationSkipInk',
       'textCase',
       'hyperlink',
       'listOptions',
@@ -599,6 +810,35 @@ function extractTextStyleRanges(node: AnyNode): UITextStyleRange[] | undefined {
   return undefined;
 }
 
+function extractTextDecorationMeasurement(
+  value: unknown,
+): UIStyle['textDecorationOffset'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const measurement = value as Record<string, unknown>;
+  if (measurement.unit === 'AUTO') return { unit: 'auto' };
+  if (typeof measurement.value !== 'number') return undefined;
+  if (measurement.unit === 'PIXELS') return { unit: 'px', value: measurement.value };
+  if (measurement.unit === 'PERCENT') return { unit: 'percent', value: measurement.value };
+  return undefined;
+}
+
+function extractTextDecorationColor(
+  value: unknown,
+): UIStyle['textDecorationColor'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const decoration = value as Record<string, unknown>;
+  if (decoration.value === 'AUTO') return { auto: true };
+  if (!decoration.value || typeof decoration.value !== 'object') return undefined;
+  const paint = decoration.value as AnyNode;
+  if (paint.type !== 'SOLID' || !paint.color) return undefined;
+  const variable = resolveVariableAliasName(paint.boundVariables?.color);
+  return {
+    color: rgbaToHex({ r: paint.color.r, g: paint.color.g, b: paint.color.b, a: 1 }),
+    ...(paintOpacity(paint) !== undefined ? { opacity: paintOpacity(paint) } : {}),
+    ...(variable ? { variable } : {}),
+  };
+}
+
 function extractTextStyle(node: AnyNode): UIStyle {
   const style = extractStyle(node, true);
 
@@ -611,6 +851,7 @@ function extractTextStyle(node: AnyNode): UIStyle {
   const isMixed = typeof figma !== 'undefined' && fontName === figma.mixed;
   if (fontName && !isMixed && typeof fontName === 'object') {
     style.fontFamily = fontName.family;
+    if (typeof fontName.style === 'string') style.fontStyleName = fontName.style;
   }
 
   if (typeof node.fontSize === 'number') {
@@ -619,6 +860,14 @@ function extractTextStyle(node: AnyNode): UIStyle {
 
   if (typeof node.fontWeight === 'number') {
     style.fontWeight = node.fontWeight;
+  }
+
+  if (node.openTypeFeatures && typeof node.openTypeFeatures === 'object') {
+    const features = Object.fromEntries(
+      Object.entries(node.openTypeFeatures)
+        .filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'),
+    );
+    if (Object.keys(features).length > 0) style.openTypeFeatures = features;
   }
 
   if (node.lineHeight && typeof node.lineHeight === 'object') {
@@ -642,10 +891,57 @@ function extractTextStyle(node: AnyNode): UIStyle {
     if (alignMap[align]) style.textAlign = alignMap[align];
   }
 
+  const alignVertical = normalizeEnumValue(node.textAlignVertical);
+  if (alignVertical === 'top' || alignVertical === 'center' || alignVertical === 'bottom') {
+    style.textAlignVertical = alignVertical;
+  }
+
+  const textAutoResize = normalizeEnumValue(node.textAutoResize);
+  if (
+    textAutoResize === 'none' ||
+    textAutoResize === 'width-and-height' ||
+    textAutoResize === 'height' ||
+    textAutoResize === 'truncate'
+  ) {
+    style.textAutoResize = textAutoResize;
+  }
+
+  const textTruncation = normalizeEnumValue(node.textTruncation);
+  if (textTruncation === 'disabled' || textTruncation === 'ending') {
+    style.textTruncation = textTruncation;
+  }
+  if (typeof node.maxLines === 'number') style.maxLines = node.maxLines;
+  if (typeof node.paragraphIndent === 'number' && node.paragraphIndent !== 0) {
+    style.paragraphIndent = node.paragraphIndent;
+  }
+  if (typeof node.paragraphSpacing === 'number' && node.paragraphSpacing !== 0) {
+    style.paragraphSpacing = node.paragraphSpacing;
+  }
+  if (typeof node.listSpacing === 'number' && node.listSpacing !== 0) {
+    style.listSpacing = node.listSpacing;
+  }
+  if (node.hangingPunctuation === true) style.hangingPunctuation = true;
+  if (node.hangingList === true) style.hangingList = true;
+  const leadingTrim = normalizeEnumValue(node.leadingTrim);
+  if (leadingTrim === 'cap-height' || leadingTrim === 'none') style.leadingTrim = leadingTrim;
+
   // Text decoration
   const decoration: string | undefined = node.textDecoration;
   if (decoration === 'UNDERLINE') style.textDecoration = 'underline';
   if (decoration === 'STRIKETHROUGH') style.textDecoration = 'strikethrough';
+  const decorationStyle = normalizeEnumValue(node.textDecorationStyle);
+  if (decorationStyle === 'solid' || decorationStyle === 'wavy' || decorationStyle === 'dotted') {
+    style.textDecorationStyle = decorationStyle;
+  }
+  const decorationOffset = extractTextDecorationMeasurement(node.textDecorationOffset);
+  if (decorationOffset) style.textDecorationOffset = decorationOffset;
+  const decorationThickness = extractTextDecorationMeasurement(node.textDecorationThickness);
+  if (decorationThickness) style.textDecorationThickness = decorationThickness;
+  const decorationColor = extractTextDecorationColor(node.textDecorationColor);
+  if (decorationColor) style.textDecorationColor = decorationColor;
+  if (typeof node.textDecorationSkipInk === 'boolean') {
+    style.textDecorationSkipInk = node.textDecorationSkipInk;
+  }
 
   // Text case
   const textCase: string | undefined = node.textCase;
@@ -657,6 +953,22 @@ function extractTextStyle(node: AnyNode): UIStyle {
   }
 
   return style;
+}
+
+function extractGridTrackSizes(value: unknown): NonNullable<UILayout['gridRowSizes']> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tracks = value
+    .map((item) => {
+      const track = item as Record<string, unknown>;
+      const type = normalizeEnumValue(track.type);
+      if (type !== 'flex' && type !== 'fixed' && type !== 'hug') return null;
+      return {
+        type,
+        ...(typeof track.value === 'number' ? { value: track.value } : {}),
+      };
+    })
+    .filter((track): track is NonNullable<UILayout['gridRowSizes']>[number] => track !== null);
+  return tracks.length > 0 ? tracks : undefined;
 }
 
 function extractLayout(node: AnyNode): UILayout {
@@ -675,6 +987,38 @@ function extractLayout(node: AnyNode): UILayout {
   // Position relative to parent
   if (typeof node.x === 'number' && node.x !== 0) layout.x = node.x;
   if (typeof node.y === 'number' && node.y !== 0) layout.y = node.y;
+  const relativeTransform = extractTransform(node.relativeTransform);
+  if (relativeTransform) layout.relativeTransform = relativeTransform;
+  const boundingBox = node.absoluteBoundingBox;
+  const renderBounds = node.absoluteRenderBounds;
+  if (
+    boundingBox && renderBounds &&
+    typeof boundingBox.x === 'number' && typeof boundingBox.y === 'number' &&
+    typeof renderBounds.x === 'number' && typeof renderBounds.y === 'number' &&
+    typeof renderBounds.width === 'number' && typeof renderBounds.height === 'number'
+  ) {
+    layout.renderBounds = {
+      x: renderBounds.x - boundingBox.x,
+      y: renderBounds.y - boundingBox.y,
+      width: renderBounds.width,
+      height: renderBounds.height,
+    };
+  }
+
+  for (const key of ['minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
+    if (typeof node[key] === 'number') layout[key] = node[key];
+  }
+  for (const key of ['gridRowAnchorIndex', 'gridColumnAnchorIndex', 'gridRowSpan', 'gridColumnSpan'] as const) {
+    if (typeof node[key] === 'number') layout[key] = node[key];
+  }
+  const gridHorizontalAlign = normalizeEnumValue(node.gridChildHorizontalAlign);
+  if (gridHorizontalAlign === 'min' || gridHorizontalAlign === 'center' || gridHorizontalAlign === 'max' || gridHorizontalAlign === 'auto') {
+    layout.gridChildHorizontalAlign = gridHorizontalAlign;
+  }
+  const gridVerticalAlign = normalizeEnumValue(node.gridChildVerticalAlign);
+  if (gridVerticalAlign === 'min' || gridVerticalAlign === 'center' || gridVerticalAlign === 'max' || gridVerticalAlign === 'auto') {
+    layout.gridChildVerticalAlign = gridVerticalAlign;
+  }
 
   // Auto-layout child behavior. `ABSOLUTE` children keep x/y but are removed
   // from the parent's flex flow, which is critical for decorative overlaps.
@@ -716,10 +1060,25 @@ function extractLayout(node: AnyNode): UILayout {
   if (node.clipsContent === true) layout.overflow = 'hidden';
 
   const layoutMode: string = node.layoutMode ?? 'NONE';
-  layout.mode = layoutMode.toLowerCase() as UILayout['mode'];
+  const layoutModeMap: Record<string, UILayout['mode']> = {
+    NONE: 'none',
+    HORIZONTAL: 'horizontal',
+    VERTICAL: 'vertical',
+    GRID: 'grid',
+  };
+  layout.mode = layoutModeMap[layoutMode] ?? 'none';
 
   if (layoutMode === 'HORIZONTAL' || layoutMode === 'VERTICAL') {
     layout.gap = node.itemSpacing;
+    if (node.layoutWrap === 'WRAP') {
+      layout.wrap = 'wrap';
+      if (typeof node.counterAxisSpacing === 'number') {
+        layout.counterAxisSpacing = node.counterAxisSpacing;
+      }
+      if (node.counterAxisAlignContent === 'AUTO') layout.counterAxisAlignContent = 'auto';
+      if (node.counterAxisAlignContent === 'SPACE_BETWEEN') layout.counterAxisAlignContent = 'space-between';
+    }
+    if (node.itemReverseZIndex === true) layout.itemReverseZIndex = true;
     if (typeof node.strokesIncludedInLayout === 'boolean') {
       layout.strokesIncludedInLayout = node.strokesIncludedInLayout;
     }
@@ -755,6 +1114,26 @@ function extractLayout(node: AnyNode): UILayout {
     }
   }
 
+  if (layoutMode === 'GRID') {
+    layout.padding = {
+      top: node.paddingTop ?? 0,
+      right: node.paddingRight ?? 0,
+      bottom: node.paddingBottom ?? 0,
+      left: node.paddingLeft ?? 0,
+    };
+    if (typeof node.strokesIncludedInLayout === 'boolean') {
+      layout.strokesIncludedInLayout = node.strokesIncludedInLayout;
+    }
+    if (node.itemReverseZIndex === true) layout.itemReverseZIndex = true;
+    for (const key of ['gridRowCount', 'gridColumnCount', 'gridRowGap', 'gridColumnGap'] as const) {
+      if (typeof node[key] === 'number') layout[key] = node[key];
+    }
+    const gridRowSizes = extractGridTrackSizes(node.gridRowSizes);
+    if (gridRowSizes) layout.gridRowSizes = gridRowSizes;
+    const gridColumnSizes = extractGridTrackSizes(node.gridColumnSizes);
+    if (gridColumnSizes) layout.gridColumnSizes = gridColumnSizes;
+  }
+
   // Newer Figma layout sizing fields apply to children too. Prefer them when
   // available because they preserve fill/hug intent for non-auto-layout nodes.
   const horizontalSizing = toSizing(node.layoutSizingHorizontal);
@@ -775,11 +1154,62 @@ function visiblePaintCount(value: unknown): number {
 
 function unsupportedPaintTypes(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
+  const knownPaintTypes = new Set([
+    'SOLID',
+    'GRADIENT_LINEAR',
+    'GRADIENT_RADIAL',
+    'GRADIENT_ANGULAR',
+    'GRADIENT_DIAMOND',
+    'IMAGE',
+    'VIDEO',
+    'PATTERN',
+  ]);
   return [
     ...new Set(
       value
-        .filter((p: AnyNode) => p.visible !== false && (p.type === 'VIDEO' || p.type === 'PATTERN'))
-        .map((p: AnyNode) => p.type.toLowerCase()),
+        .filter((p: AnyNode) =>
+          p.visible !== false &&
+          typeof p.type === 'string' &&
+          (p.type === 'VIDEO' || p.type === 'PATTERN' || !knownPaintTypes.has(p.type)))
+        .map((p: AnyNode) => p.type.toLowerCase().replace(/_/g, '-')),
+    ),
+  ];
+}
+
+function unsupportedEffectTypes(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const cssMappedEffects = new Set([
+    'DROP_SHADOW',
+    'INNER_SHADOW',
+    'LAYER_BLUR',
+    'BACKGROUND_BLUR',
+  ]);
+  return [
+    ...new Set(
+      value
+        .filter((effect: AnyNode) =>
+          effect.visible !== false &&
+          typeof effect.type === 'string' &&
+          !cssMappedEffects.has(effect.type))
+        .map((effect: AnyNode) => effect.type.toLowerCase().replace(/_/g, '-')),
+    ),
+  ];
+}
+
+function nonCssBlendModes(node: AnyNode): string[] {
+  const sources = [
+    node,
+    ...(Array.isArray(node.fills) ? node.fills : []),
+    ...(Array.isArray(node.strokes) ? node.strokes : []),
+    ...(Array.isArray(node.effects) ? node.effects : []),
+  ];
+  return [
+    ...new Set(
+      sources
+        .map((source: AnyNode) => source?.blendMode)
+        .filter((blendMode: unknown): blendMode is string =>
+          blendMode === 'LINEAR_BURN' || blendMode === 'LINEAR_DODGE')
+        .map((blendMode) => blendMode.toLowerCase().replace(/_/g, '-')),
     ),
   ];
 }
@@ -790,20 +1220,61 @@ function isMixedValue(value: unknown): boolean {
 
 function extractFidelityWarnings(node: AnyNode, textStyleRanges?: UITextStyleRange[]): UIFidelityWarning[] | undefined {
   const warnings: UIFidelityWarning[] = [];
+  const hasVariableWidthStroke =
+    node.variableWidthStrokeProperties &&
+    node.variableWidthStrokeProperties.widthProfile !== 'UNIFORM';
+  const hasComplexStroke =
+    node.complexStrokeProperties &&
+    node.complexStrokeProperties.type !== 'BASIC';
+  if (hasVariableWidthStroke || hasComplexStroke) {
+    warnings.push({
+      code: 'complex-stroke',
+      severity: 'critical',
+      message: 'Variable-width, brush, or dynamic stroke requires the Figma-rendered fallback for exact fidelity.',
+    });
+  }
+  const hasNonCssGradient = [...(Array.isArray(node.fills) ? node.fills : []), ...(Array.isArray(node.strokes) ? node.strokes : [])]
+    .some((paint: AnyNode) =>
+      paint.visible !== false &&
+      (paint.type === 'GRADIENT_ANGULAR' || paint.type === 'GRADIENT_DIAMOND'));
+  if (hasNonCssGradient) {
+    warnings.push({
+      code: 'non-css-gradient',
+      severity: 'critical',
+      message: 'Angular or diamond gradient requires the Figma-rendered fallback for exact transform and interpolation fidelity.',
+    });
+  }
+  const hasProgressiveBlur = Array.isArray(node.effects) && node.effects.some(
+    (effect: AnyNode) => effect.visible !== false && effect.blurType === 'PROGRESSIVE',
+  );
+  if (hasProgressiveBlur) {
+    warnings.push({
+      code: 'progressive-blur',
+      severity: 'critical',
+      message: 'Progressive blur has no exact CSS equivalent and requires the Figma-rendered fallback.',
+    });
+  }
+  for (const blendMode of nonCssBlendModes(node)) {
+    warnings.push({
+      code: `non-css-blend-mode-${blendMode}`,
+      severity: 'critical',
+      message: `${blendMode} is a Figma compositing mode without an exact portable CSS equivalent; use the rendered fallback.`,
+    });
+  }
   const fillCount = visiblePaintCount(node.fills);
   const strokeCount = visiblePaintCount(node.strokes);
   if (fillCount > 1) {
     warnings.push({
       code: 'multiple-fills',
-      severity: 'warning',
-      message: `${fillCount} visible fills detected; preserve style.fills paint stack in order instead of relying only on convenience fields.`,
+      severity: 'critical',
+      message: `${fillCount} visible fills require the Figma-rendered fallback for exact paint order, clipping, and blend fidelity; style.fills remains implementation metadata.`,
     });
   }
   if (strokeCount > 1) {
     warnings.push({
       code: 'multiple-strokes',
-      severity: 'warning',
-      message: `${strokeCount} visible strokes detected; preserve style.strokes paint stack in order.`,
+      severity: 'critical',
+      message: `${strokeCount} visible strokes require the Figma-rendered fallback for exact geometry, paint order, and blend fidelity; style.strokes remains implementation metadata.`,
     });
   }
   for (const type of unsupportedPaintTypes(node.fills)) {
@@ -820,14 +1291,22 @@ function extractFidelityWarnings(node: AnyNode, textStyleRanges?: UITextStyleRan
       message: `${type} stroke metadata is captured but cannot be faithfully converted to plain CSS/HTML without a rendered asset or custom renderer.`,
     });
   }
-  if (node.type === 'TEXT' && textStyleRanges && textStyleRanges.length > 1) {
+  for (const type of unsupportedEffectTypes(node.effects)) {
+    warnings.push({
+      code: `unsupported-effect-${type}`,
+      severity: 'critical',
+      message: `${type} effect metadata is captured when available, but exact rendering requires the Figma-rendered fallback.`,
+    });
+  }
+  const isTextNode = node.type === 'TEXT' || node.type === 'TEXT_PATH';
+  if (isTextNode && textStyleRanges && textStyleRanges.length > 1) {
     warnings.push({
       code: 'mixed-text-styles',
       severity: 'warning',
       message: `${textStyleRanges.length} text style ranges detected; use textStyleRanges for per-character styling instead of only node-level style.`,
     });
   }
-  if (node.type === 'TEXT' && (isMixedValue(node.fontName) || isMixedValue(node.fills)) && !textStyleRanges) {
+  if (isTextNode && (isMixedValue(node.fontName) || isMixedValue(node.fills)) && !textStyleRanges) {
     warnings.push({
       code: 'unresolved-mixed-text-style',
       severity: 'warning',
@@ -837,12 +1316,265 @@ function extractFidelityWarnings(node: AnyNode, textStyleRanges?: UITextStyleRan
   return warnings.length > 0 ? warnings : undefined;
 }
 
+function toJsonValue(value: unknown, seen = new WeakSet<object>()): UIJsonValue | undefined {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== 'object') return undefined;
+  if (seen.has(value)) return undefined;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const result = value.flatMap((item) => {
+      const normalized = toJsonValue(item, seen);
+      return normalized === undefined ? [] : [normalized];
+    });
+    seen.delete(value);
+    return result;
+  }
+  const result: Record<string, UIJsonValue> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const normalized = toJsonValue(item, seen);
+    if (normalized !== undefined) result[key] = normalized;
+  }
+  seen.delete(value);
+  return result;
+}
+
+function jsonObject(value: unknown): Record<string, UIJsonValue> | undefined {
+  const normalized = toJsonValue(value);
+  return normalized && !Array.isArray(normalized) && typeof normalized === 'object'
+    ? normalized
+    : undefined;
+}
+
+function extractReactions(value: unknown): UIPrototypeReaction[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const reactions = value.flatMap((reaction): UIPrototypeReaction[] => {
+    const source = reaction as AnyNode;
+    const triggerObject = source.trigger === null ? null : jsonObject(source.trigger);
+    const trigger = triggerObject && typeof triggerObject.type === 'string'
+      ? triggerObject as UIPrototypeTrigger
+      : null;
+    const rawActions = Array.isArray(source.actions)
+      ? source.actions
+      : source.action ? [source.action] : [];
+    const actions = rawActions.flatMap((action: unknown): UIPrototypeAction[] => {
+      const normalized = jsonObject(action);
+      return normalized && typeof normalized.type === 'string'
+        ? [normalized as UIPrototypeAction]
+        : [];
+    });
+    return trigger || actions.length > 0 ? [{ trigger, actions }] : [];
+  });
+  return reactions.length > 0 ? reactions : undefined;
+}
+
+function collectReferencedVariableIds(value: unknown, result = new Set<string>(), field?: string): Set<string> {
+  if (typeof value === 'string' && field === 'variableId') {
+    result.add(value);
+    return result;
+  }
+  if (!value || typeof value !== 'object') return result;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectReferencedVariableIds(item, result));
+    return result;
+  }
+  const source = value as Record<string, unknown>;
+  if (source.type === 'VARIABLE_ALIAS' && typeof source.id === 'string') {
+    result.add(source.id);
+  }
+  for (const [key, nested] of Object.entries(source)) {
+    collectReferencedVariableIds(nested, result, key);
+  }
+  return result;
+}
+
+function extractReferencedVariables(...sources: unknown[]): UIVariableDefinition[] | undefined {
+  if (typeof figma === 'undefined' || !figma.variables) return undefined;
+  const ids = new Set<string>();
+  sources.forEach((source) => collectReferencedVariableIds(source, ids));
+  const definitions: UIVariableDefinition[] = [];
+
+  for (const id of [...ids].sort()) {
+    try {
+      const variable = figma.variables.getVariableById(id);
+      if (!variable) continue;
+      const collection = figma.variables.getVariableCollectionById(variable.variableCollectionId);
+      const modeNames = new Map(collection?.modes.map((mode) => [mode.modeId, mode.name]) ?? []);
+      const valuesByMode: NonNullable<UIVariableDefinition['valuesByMode']> = {};
+      for (const [modeId, rawValue] of Object.entries(variable.valuesByMode ?? {})) {
+        const value = toJsonValue(rawValue);
+        if (value === undefined) continue;
+        const modeName = modeNames.get(modeId);
+        valuesByMode[modeId] = {
+          ...(modeName ? { modeName } : {}),
+          value,
+        };
+      }
+      const codeSyntax = variable.codeSyntax && typeof variable.codeSyntax === 'object'
+        ? Object.fromEntries(Object.entries(variable.codeSyntax)
+            .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0))
+        : undefined;
+      definitions.push({
+        id,
+        name: variable.name,
+        collectionId: variable.variableCollectionId,
+        ...(collection?.name ? { collectionName: collection.name } : {}),
+        ...(typeof variable.resolvedType === 'string' ? { resolvedType: variable.resolvedType } : {}),
+        ...(typeof variable.description === 'string' && variable.description.length > 0
+          ? { description: variable.description }
+          : {}),
+        ...(Array.isArray(variable.scopes)
+          ? { scopes: variable.scopes.filter((scope: unknown): scope is string => typeof scope === 'string') }
+          : {}),
+        ...(codeSyntax && Object.keys(codeSyntax).length > 0 ? { codeSyntax } : {}),
+        ...(Object.keys(valuesByMode).length > 0 ? { valuesByMode } : {}),
+      });
+    } catch { /* omit variables unavailable to this file or plan */ }
+  }
+  return definitions.length > 0 ? definitions : undefined;
+}
+
+function cleanComponentPropertyName(name: string): string {
+  return name.replace(/#\d+:\d+$/, '');
+}
+
+function safelyReadProperty(source: AnyNode, property: string): unknown {
+  try {
+    return source[property];
+  } catch {
+    return undefined;
+  }
+}
+
+function applySemanticMetadata(result: UISerializedNode, source: AnyNode): void {
+  const reactions = extractReactions(source.reactions);
+  if (reactions) result.reactions = reactions;
+  if (typeof source.description === 'string' && source.description.length > 0) {
+    result.description = source.description;
+  }
+  if (typeof source.descriptionMarkdown === 'string' && source.descriptionMarkdown.length > 0) {
+    result.descriptionMarkdown = source.descriptionMarkdown;
+  }
+  if (Array.isArray(source.documentationLinks)) {
+    const links = source.documentationLinks.flatMap((link: AnyNode) =>
+      typeof link?.uri === 'string' && link.uri.length > 0 ? [link.uri] : []);
+    if (links.length > 0) result.documentationLinks = links;
+  }
+  const rawComponentPropertyDefinitions = safelyReadProperty(source, 'componentPropertyDefinitions');
+  if (rawComponentPropertyDefinitions && typeof rawComponentPropertyDefinitions === 'object') {
+    const definitions: NonNullable<UISerializedNode['componentPropertyDefinitions']> = {};
+    for (const [key, rawDefinition] of Object.entries(rawComponentPropertyDefinitions)) {
+      const definition = rawDefinition as AnyNode;
+      if (
+        typeof definition.type !== 'string'
+        || (typeof definition.defaultValue !== 'string' && typeof definition.defaultValue !== 'boolean')
+      ) continue;
+      const preferredValues = Array.isArray(definition.preferredValues)
+        ? definition.preferredValues.flatMap((value: AnyNode) =>
+            typeof value?.type === 'string' && typeof value?.key === 'string'
+              ? [{ type: value.type, key: value.key }]
+              : [])
+        : undefined;
+      const variantOptions = Array.isArray(definition.variantOptions)
+        ? definition.variantOptions.filter((value: unknown): value is string => typeof value === 'string')
+        : undefined;
+      definitions[cleanComponentPropertyName(key)] = {
+        type: definition.type,
+        defaultValue: definition.defaultValue,
+        ...(preferredValues?.length ? { preferredValues } : {}),
+        ...(variantOptions?.length ? { variantOptions } : {}),
+        ...(typeof definition.description === 'string' && definition.description.length > 0
+          ? { description: definition.description }
+          : {}),
+      };
+    }
+    if (Object.keys(definitions).length > 0) result.componentPropertyDefinitions = definitions;
+  }
+
+  const prototype: NonNullable<UISerializedNode['prototype']> = {};
+  const overflowDirection = normalizeEnumValue(source.overflowDirection);
+  if (overflowDirection === 'none' || overflowDirection === 'horizontal' || overflowDirection === 'vertical' || overflowDirection === 'both') {
+    prototype.overflowDirection = overflowDirection;
+  }
+  if (
+    typeof source.numberOfFixedChildren === 'number'
+    && source.numberOfFixedChildren > 0
+    && Array.isArray(source.children)
+  ) {
+    prototype.fixedChildIds = source.children
+      .slice(-source.numberOfFixedChildren)
+      .flatMap((child: AnyNode) => typeof child?.id === 'string' ? [child.id] : []);
+  }
+  const overlayPositionType = normalizeEnumValue(source.overlayPositionType);
+  if (
+    overlayPositionType === 'center'
+    || overlayPositionType === 'top-left'
+    || overlayPositionType === 'top-center'
+    || overlayPositionType === 'top-right'
+    || overlayPositionType === 'bottom-left'
+    || overlayPositionType === 'bottom-center'
+    || overlayPositionType === 'bottom-right'
+    || overlayPositionType === 'manual'
+  ) {
+    prototype.overlayPositionType = overlayPositionType;
+  }
+  const overlayBackground = toJsonValue(source.overlayBackground);
+  if (overlayBackground !== undefined) prototype.overlayBackground = overlayBackground;
+  const overlayBackgroundInteraction = normalizeEnumValue(source.overlayBackgroundInteraction);
+  if (overlayBackgroundInteraction === 'none' || overlayBackgroundInteraction === 'close-on-click-outside') {
+    prototype.overlayBackgroundInteraction = overlayBackgroundInteraction;
+  }
+  if (Object.keys(prototype).length > 0) result.prototype = prototype;
+
+  if (Array.isArray(source.annotations)) {
+    const annotations = source.annotations.flatMap((rawAnnotation: unknown) => {
+      if (!rawAnnotation || typeof rawAnnotation !== 'object') return [];
+      const annotation = rawAnnotation as Record<string, unknown>;
+      const properties = Array.isArray(annotation.properties)
+        ? annotation.properties.flatMap((property: unknown) => {
+            if (!property || typeof property !== 'object') return [];
+            const type = (property as Record<string, unknown>).type;
+            return typeof type === 'string' ? [type] : [];
+          })
+        : undefined;
+      const normalized = {
+        ...(typeof annotation.label === 'string' && annotation.label.length > 0 ? { label: annotation.label } : {}),
+        ...(typeof annotation.labelMarkdown === 'string' && annotation.labelMarkdown.length > 0
+          ? { labelMarkdown: annotation.labelMarkdown }
+          : {}),
+        ...(properties?.length ? { properties } : {}),
+        ...(typeof annotation.categoryId === 'string' && annotation.categoryId.length > 0
+          ? { categoryId: annotation.categoryId }
+          : {}),
+      };
+      return Object.keys(normalized).length > 0 ? [normalized] : [];
+    });
+    if (annotations.length > 0) result.annotations = annotations;
+  }
+
+  if (source.componentPropertyReferences && typeof source.componentPropertyReferences === 'object') {
+    const references: NonNullable<UISerializedNode['componentPropertyReferences']> = {};
+    for (const field of ['visible', 'characters', 'mainComponent'] as const) {
+      const propertyName = source.componentPropertyReferences[field];
+      if (typeof propertyName === 'string') references[field] = cleanComponentPropertyName(propertyName);
+    }
+    if (Object.keys(references).length > 0) result.componentPropertyReferences = references;
+  }
+  const variableBindings = extractVariableBindings(source.boundVariables);
+  if (variableBindings) result.variableBindings = variableBindings;
+  const explicitVariableModes = extractExplicitVariableModes(source.explicitVariableModes);
+  if (explicitVariableModes) result.explicitVariableModes = explicitVariableModes;
+  const referencedVariables = extractReferencedVariables(source.boundVariables, source.reactions);
+  if (referencedVariables) result.referencedVariables = referencedVariables;
+}
+
 function finalizeNode(
   result: UISerializedNode,
   source: AnyNode,
   textStyleRanges?: UITextStyleRange[],
 ): UISerializedNode {
   if (textStyleRanges) result.textStyleRanges = textStyleRanges;
+  applySemanticMetadata(result, source);
   const warnings = extractFidelityWarnings(source, textStyleRanges);
   if (warnings) result.fidelityWarnings = warnings;
   return result;
@@ -857,8 +1589,12 @@ function recurseChildren(node: AnyNode): UISerializedNode[] | undefined {
 }
 
 export function extractNode(node: SceneNode): UISerializedNode | null {
-  const n = node as AnyNode;
+  const n = safelyReadableNode(node as AnyNode);
   const nodeType: string = n.type;
+  const arcData = nodeType === 'ELLIPSE' ? extractArcData(n.arcData) : undefined;
+  const transformModifiers = nodeType === 'TRANSFORM_GROUP'
+    ? extractTransformModifiers(n.transformModifiers)
+    : undefined;
 
   const base = {
     id: n.id as string,
@@ -866,16 +1602,22 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
     type: nodeType as UINodeType,
     visible: n.visible as boolean,
     ...extractVectorData(n),
+    ...(arcData ? { arcData } : {}),
+    ...(transformModifiers ? { transformModifiers } : {}),
   };
 
   // TEXT — special: extract text content + typography
-  if (nodeType === 'TEXT') {
+  if (nodeType === 'TEXT' || nodeType === 'TEXT_PATH') {
     const textStyleRanges = extractTextStyleRanges(n);
+    const textPathStartData = nodeType === 'TEXT_PATH'
+      ? extractTextPathStartData(n.textPathStartData)
+      : undefined;
     return finalizeNode({
       ...base,
       text: n.characters as string,
       style: extractTextStyle(n),
       layout: extractLayout(n),
+      ...(textPathStartData ? { textPathStartData } : {}),
     }, n, textStyleRanges);
   }
 
@@ -892,15 +1634,23 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
     const props = n.componentProperties;
     if (props && typeof props === 'object') {
       const mapped: Record<string, string> = {};
+      const details: NonNullable<UISerializedNode['componentPropertyDetails']> = {};
       for (const [key, val] of Object.entries(props)) {
-        const v = val as { value?: unknown };
+        const v = val as { type?: unknown; value?: unknown };
         if (v.value !== undefined) {
           // Strip internal hash suffix from key (e.g. "State#123:0" → "State")
-          const cleanKey = key.replace(/#\d+:\d+$/, '');
+          const cleanKey = cleanComponentPropertyName(key);
           mapped[cleanKey] = String(v.value);
+          if (
+            typeof v.type === 'string'
+            && (typeof v.value === 'string' || typeof v.value === 'boolean')
+          ) {
+            details[cleanKey] = { type: v.type, value: v.value };
+          }
         }
       }
       if (Object.keys(mapped).length > 0) result.componentProperties = mapped;
+      if (Object.keys(details).length > 0) result.componentPropertyDetails = details;
     }
 
     // Expand children so active/inactive styles are visible
@@ -921,11 +1671,12 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
     return finalizeNode(result, n);
   }
 
-  // GROUP — basic layout + recurse children (no style of its own)
+  // GROUP — group-level opacity, blend mode, and effects change every child.
   if (GROUP_TYPES.has(nodeType)) {
     const result: UISerializedNode = {
       ...base,
       layout: extractLayout(n),
+      style: extractStyle(n),
     };
     const children = recurseChildren(n);
     if (children) result.children = children;

@@ -2,9 +2,17 @@ import { extractNode } from './extractor';
 import { normalizeNode } from './normalizer';
 import { PROTOCOL_VERSION } from '../shared/types';
 import { getImageAssetKey, hasRenderSpecificImagePaint } from '../shared/imageAssets';
-import type { SandboxMessage, UISerializedNode, UIMessage, UILayout } from '../shared/types';
+import { collectRenderedFallbackCandidates } from '../shared/fidelity';
+import { detectEncodedImageMediaType } from '../shared/imageBytes';
+import { buildFigmaNodeUrl } from '../shared/figmaLocator';
+import { mapWithConcurrency } from '../shared/asyncPool';
+import { effectiveSourceRasterDensity, MIN_SHARP_RASTER_SCALE, renderSpecificRasterScale, sourceAwareAssetRasterScale } from '../shared/rasterScale';
+import type { CaptureReferenceDataMessage, ImageSourceRasterEvidence, SandboxMessage, UISerializedNode, UIMessage, UILayout, UITransform } from '../shared/types';
 
 figma.showUI(__html__, { width: 480, height: 560 });
+
+const CAPTURE_EXPORT_CONCURRENCY = 4;
+const FALLBACK_NODE_CONCURRENCY = 2;
 
 /** Marker id for a synthetic multi-selection root. The UI treats it as a
  *  regular node; the sandbox recognizes it in export flows since no real
@@ -75,11 +83,32 @@ function buildMultiSelectionRoot(selection: ReadonlyArray<SceneNode>): UISeriali
 let currentExportId = 0;
 let lastNormalized: UISerializedNode | null = null;
 
-interface ImageNode { id: string; hash: string; renderAtOriginalScale: boolean }
+interface ImageNode {
+  id: string;
+  hash: string;
+  renderAtOriginalScale: boolean;
+  scaleMode?: 'fill' | 'fit' | 'crop' | 'tile';
+  transform?: UITransform;
+  scalingFactor?: number;
+  rotation?: number;
+  width: number;
+  height: number;
+}
 
 /** Collect nodes that have image fills, deduped by rendered appearance. */
 function collectImageNodes(node: UISerializedNode): ImageNode[] {
-  const entries: Array<{ id: string; hash: string; key: string; renderSpecific: boolean }> = [];
+  const entries: Array<{
+    id: string;
+    hash: string;
+    key: string;
+    renderSpecific: boolean;
+    scaleMode?: 'fill' | 'fit' | 'crop' | 'tile';
+    transform?: UITransform;
+    scalingFactor?: number;
+    rotation?: number;
+    width: number;
+    height: number;
+  }> = [];
   const seenKeys = new Set<string>();
   function walk(n: UISerializedNode): void {
     if (n.visible === false) return;
@@ -91,6 +120,12 @@ function collectImageNodes(node: UISerializedNode): ImageNode[] {
         hash: n.style.imageFillHash,
         key,
         renderSpecific: hasRenderSpecificImagePaint(n),
+        scaleMode: n.style.imageFillScaleMode,
+        transform: n.style.imageFillTransform,
+        scalingFactor: n.style.imageFillScalingFactor,
+        rotation: n.style.imageFillRotation,
+        width: n.layout?.width ?? 0,
+        height: n.layout?.height ?? 0,
       });
     }
     n.children?.forEach(walk);
@@ -108,6 +143,12 @@ function collectImageNodes(node: UISerializedNode): ImageNode[] {
     id: entry.id,
     hash: entry.hash,
     renderAtOriginalScale: entry.renderSpecific || (keysByHash.get(entry.hash)?.size ?? 0) > 1,
+    scaleMode: entry.scaleMode,
+    transform: entry.transform,
+    scalingFactor: entry.scalingFactor,
+    rotation: entry.rotation,
+    width: entry.width,
+    height: entry.height,
   }));
 }
 
@@ -127,22 +168,66 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
   return result;
 }
 
+async function measureSourceRasterEvidence(
+  imageNodes: ImageNode[],
+): Promise<Record<string, ImageSourceRasterEvidence>> {
+  const entries = await mapWithConcurrency(
+    imageNodes,
+    CAPTURE_EXPORT_CONCURRENCY,
+    async (imageNode): Promise<[string, ImageSourceRasterEvidence]> => {
+      const sceneNode = figma.getNodeById(imageNode.id);
+      const renderedWidth = sceneNode && 'width' in sceneNode
+        ? (sceneNode as SceneNode).width
+        : imageNode.width;
+      const renderedHeight = sceneNode && 'height' in sceneNode
+        ? (sceneNode as SceneNode).height
+        : imageNode.height;
+      try {
+        const image = figma.getImageByHash(imageNode.hash);
+        const sourceSize = image ? await image.getSizeAsync() : null;
+        const density = effectiveSourceRasterDensity(sourceSize, {
+          width: renderedWidth,
+          height: renderedHeight,
+        }, {
+          scaleMode: imageNode.scaleMode,
+          transform: imageNode.transform,
+          scalingFactor: imageNode.scalingFactor,
+          rotation: imageNode.rotation,
+        });
+        return [imageNode.id, {
+          verified: density !== null,
+          ...density,
+          ...(sourceSize ? { sourceWidth: sourceSize.width, sourceHeight: sourceSize.height } : {}),
+          renderedWidth,
+          renderedHeight,
+        }];
+      } catch {
+        return [imageNode.id, { verified: false, renderedWidth, renderedHeight }];
+      }
+    },
+  );
+  return Object.fromEntries(entries);
+}
+
 /** Render the whole selection as one composite image (same as Figma's native Export) */
 async function exportMerged(
-  rootId: string,
+  root: UISerializedNode,
   scale: number,
   format: 'PNG' | 'JPG' | 'SVG',
   exportId: number,
 ): Promise<void> {
+  const sourceRasterEvidence = format === 'SVG'
+    ? {}
+    : await measureSourceRasterEvidence(collectImageNodes(root));
   // Multi-selection: sandbox has no canvas, so render each top-level selection
   // and let the UI composite via <canvas>. Falls through to the single-node path
   // only when the synthetic root is somehow present without a live multi-selection.
-  if (rootId === SYNTHETIC_MULTI_ID) {
-    await exportMergedMulti(scale, format, exportId);
+  if (root.id === SYNTHETIC_MULTI_ID) {
+    await exportMergedMulti(scale, format, exportId, sourceRasterEvidence);
     return;
   }
 
-  const sceneNode = figma.getNodeById(rootId);
+  const sceneNode = figma.getNodeById(root.id);
   if (!sceneNode || !('exportAsync' in sceneNode)) {
     // Don't leave the UI stuck on "loading…"
     if (exportId !== currentExportId) return;
@@ -150,9 +235,9 @@ async function exportMerged(
     return;
   }
 
-  // scale=0 is "original raster via getImageByHash" — meaningless for a merged render.
-  // Fall back to 1x so the merged mode always renders at a sensible size.
-  const effectiveScale = scale === 0 ? 1 : scale;
+  // Orig is meaningless for a merged render. Preserve the sharp default if a
+  // stale request reaches this defensive path during a mode transition.
+  const effectiveScale = scale === 0 ? MIN_SHARP_RASTER_SCALE : scale;
 
   try {
     const bytes = await (sceneNode as SceneNode).exportAsync({
@@ -166,7 +251,12 @@ async function exportMerged(
         ? 'image/svg+xml'
         : 'image/png';
     const dataUrl = `data:${mime};base64,${uint8ArrayToBase64(bytes)}`;
-    const msg: SandboxMessage = { type: 'image-data', images: {}, merged: dataUrl };
+    const msg: SandboxMessage = {
+      type: 'image-data',
+      images: {},
+      merged: dataUrl,
+      ...(Object.keys(sourceRasterEvidence).length > 0 ? { sourceRasterEvidence } : {}),
+    };
     figma.ui.postMessage(msg);
   } catch {
     if (exportId !== currentExportId) return;
@@ -181,6 +271,7 @@ async function exportMergedMulti(
   scale: number,
   format: 'PNG' | 'JPG' | 'SVG',
   exportId: number,
+  sourceRasterEvidence: Record<string, ImageSourceRasterEvidence>,
 ): Promise<void> {
   const selection = figma.currentPage.selection;
   const bbox = selectionBBox(selection);
@@ -190,7 +281,7 @@ async function exportMergedMulti(
     return;
   }
 
-  const effectiveScale = scale === 0 ? 1 : scale;
+  const effectiveScale = scale === 0 ? MIN_SHARP_RASTER_SCALE : scale;
   const mime = format === 'JPG' ? 'image/jpeg' : format === 'SVG' ? 'image/svg+xml' : 'image/png';
   const tiles: Array<{ dataUrl: string; x: number; y: number; width: number; height: number }> = [];
 
@@ -225,6 +316,7 @@ async function exportMergedMulti(
       format,
       scale: effectiveScale,
     },
+    ...(Object.keys(sourceRasterEvidence).length > 0 ? { sourceRasterEvidence } : {}),
   };
   figma.ui.postMessage(msg);
 }
@@ -239,10 +331,14 @@ async function exportImages(
   if (imageNodes.length === 0) return;
 
   const images: Record<string, string> = {};
+  const sourceRasterEvidence = format === 'SVG'
+    ? {}
+    : await measureSourceRasterEvidence(
+        scale === 0 ? imageNodes.filter((image) => image.renderAtOriginalScale) : imageNodes,
+      );
 
-  // scale=0 ("Original") means: bypass exportAsync and return the uploaded raster
-  // via getImageByHash — this is always PNG by definition. The UI reconciles JPG/SVG
-  // away from scale=0 so this branch only runs for PNG+Original.
+  // scale=0 ("Original") returns uploaded raster bytes via getImageByHash when
+  // possible. Paint-specific crop/filter/transform variants must use exportAsync.
   // Note: SVG export for nodes with IMAGE fills may have a <image> transform bug
   // upstream in Figma; we honor the user's format choice rather than silently
   // downgrading to PNG.
@@ -256,9 +352,18 @@ async function exportImages(
         if (img.renderAtOriginalScale) {
           const sceneNode = figma.getNodeById(img.id);
           if (!sceneNode || !('exportAsync' in sceneNode)) continue;
-          const bytes = await (sceneNode as SceneNode).exportAsync({
+          const exportable = sceneNode as SceneNode;
+          const measured = sourceRasterEvidence[img.id];
+          const sourceSize = measured?.sourceWidth && measured.sourceHeight
+            ? { width: measured.sourceWidth, height: measured.sourceHeight }
+            : null;
+          const effectiveScale = renderSpecificRasterScale(sourceSize, {
+            width: exportable.width,
+            height: exportable.height,
+          }, measured?.density);
+          const bytes = await exportable.exportAsync({
             format: 'PNG',
-            constraint: { type: 'SCALE' as const, value: 1 },
+            constraint: { type: 'SCALE' as const, value: effectiveScale },
           });
           images[img.id] = `data:image/png;base64,${uint8ArrayToBase64(bytes)}`;
           continue;
@@ -267,7 +372,10 @@ async function exportImages(
         const image = figma.getImageByHash(img.hash);
         if (image) {
           const bytes = await image.getBytesAsync();
-          images[img.id] = `data:image/png;base64,${uint8ArrayToBase64(bytes)}`;
+          const mediaType = detectEncodedImageMediaType(bytes);
+          if (mediaType) {
+            images[img.id] = `data:${mediaType};base64,${uint8ArrayToBase64(bytes)}`;
+          }
         }
       } catch { /* skip */ }
     }
@@ -290,7 +398,11 @@ async function exportImages(
   }
 
   if (exportId !== currentExportId) return;
-  const msg: SandboxMessage = { type: 'image-data', images };
+  const msg: SandboxMessage = {
+    type: 'image-data',
+    images,
+    ...(Object.keys(sourceRasterEvidence).length > 0 ? { sourceRasterEvidence } : {}),
+  };
   figma.ui.postMessage(msg);
 }
 
@@ -305,9 +417,12 @@ async function exportPerSelection(
   const selection = figma.currentPage.selection;
   if (selection.length === 0) return;
 
-  const effectiveScale = scale === 0 ? 1 : scale;
+  const effectiveScale = scale === 0 ? MIN_SHARP_RASTER_SCALE : scale;
   const mime = format === 'JPG' ? 'image/jpeg' : format === 'SVG' ? 'image/svg+xml' : 'image/png';
   const images: Record<string, string> = {};
+  const sourceRasterEvidence = format === 'SVG' || !lastNormalized
+    ? {}
+    : await measureSourceRasterEvidence(collectImageNodes(lastNormalized));
 
   for (const node of selection) {
     if (exportId !== currentExportId) return;
@@ -322,7 +437,11 @@ async function exportPerSelection(
   }
 
   if (exportId !== currentExportId) return;
-  const msg: SandboxMessage = { type: 'image-data', images };
+  const msg: SandboxMessage = {
+    type: 'image-data',
+    images,
+    ...(Object.keys(sourceRasterEvidence).length > 0 ? { sourceRasterEvidence } : {}),
+  };
   figma.ui.postMessage(msg);
 }
 
@@ -332,15 +451,35 @@ function topLevelNodeIds(root: UISerializedNode): string[] {
     : [root.id];
 }
 
-async function exportNodePng(nodeId: string): Promise<string | null> {
+async function exportNodePng(nodeId: string, scale = 1): Promise<string | null> {
   const node = figma.getNodeById(nodeId);
   if (!node || !('exportAsync' in node)) return null;
   try {
     const bytes = await (node as SceneNode).exportAsync({
       format: 'PNG',
-      constraint: { type: 'SCALE', value: 1 },
+      contentsOnly: true,
+      constraint: { type: 'SCALE', value: scale },
+      colorProfile: 'DOCUMENT',
     });
     return `data:image/png;base64,${uint8ArrayToBase64(bytes)}`;
+  } catch {
+    return null;
+  }
+}
+
+async function exportNodeSvgFallback(nodeId: string): Promise<string | null> {
+  const node = figma.getNodeById(nodeId);
+  if (!node || !('exportAsync' in node)) return null;
+  try {
+    const bytes = await (node as SceneNode).exportAsync({
+      format: 'SVG',
+      contentsOnly: true,
+      svgOutlineText: true,
+      svgSimplifyStroke: false,
+      svgIdAttribute: false,
+      colorProfile: 'DOCUMENT',
+    });
+    return `data:image/svg+xml;base64,${uint8ArrayToBase64(bytes)}`;
   } catch {
     return null;
   }
@@ -367,29 +506,76 @@ async function exportCapture(
       sourceUrl: null,
       references: {},
       assets: {},
+      renderedFallbacks: {},
       warnings: ['The Figma selection changed before capture started.'],
     } satisfies SandboxMessage);
     return;
   }
 
   const references: Record<string, string> = {};
-  for (const nodeId of request.nodeIds) {
-    const dataUrl = await exportNodePng(nodeId);
+  const referenceResults = await mapWithConcurrency(
+    request.nodeIds,
+    CAPTURE_EXPORT_CONCURRENCY,
+    async (nodeId) => ({ nodeId, dataUrl: await exportNodePng(nodeId) }),
+  );
+  for (const { nodeId, dataUrl } of referenceResults) {
     if (dataUrl) references[nodeId] = dataUrl;
     else warnings.push(`Unable to render selected node ${nodeId}.`);
   }
 
   const assets: Record<string, string> = {};
-  for (const image of collectImageNodes(lastNormalized)) {
-    const dataUrl = await exportNodePng(image.id);
-    if (dataUrl) assets[image.id] = dataUrl;
-    else warnings.push(`Unable to render design asset ${image.id}.`);
+  const renderedFallbacks: NonNullable<CaptureReferenceDataMessage['renderedFallbacks']> = {};
+  if (request.includeAssets) {
+    const imageNodes = collectImageNodes(lastNormalized);
+    const sourceRasterEvidence = await measureSourceRasterEvidence(imageNodes);
+    const assetResults = await mapWithConcurrency(
+      imageNodes,
+      CAPTURE_EXPORT_CONCURRENCY,
+      async (image) => {
+        const evidence = sourceRasterEvidence[image.id];
+        return {
+          image,
+          evidence,
+          dataUrl: await exportNodePng(image.id, sourceAwareAssetRasterScale(evidence)),
+        };
+      },
+    );
+    for (const { image, evidence, dataUrl } of assetResults) {
+      if (dataUrl) assets[image.id] = dataUrl;
+      else warnings.push(`Unable to render design asset ${image.id}.`);
+      if (!evidence?.verified || !Number.isFinite(evidence.density)) {
+        warnings.push(`Unable to verify source resolution for design asset ${image.id}; its AI-package asset is limited to the authored 1× viewport.`);
+      } else if ((evidence.density as number) + 0.01 < MIN_SHARP_RASTER_SCALE) {
+        warnings.push(`Design asset ${image.id} provides only ${(evidence.density as number).toFixed(2)}× real source detail; replace the Figma image with a 2× or higher source for retina-sharp AI output.`);
+      }
+    }
+
+    const fallbackResults = await mapWithConcurrency(
+      collectRenderedFallbackCandidates(lastNormalized),
+      FALLBACK_NODE_CONCURRENCY,
+      async (candidate) => {
+        const [pngDataUrl, svgDataUrl] = await Promise.all([
+          exportNodePng(candidate.nodeId),
+          exportNodeSvgFallback(candidate.nodeId),
+        ]);
+        return { candidate, pngDataUrl, svgDataUrl };
+      },
+    );
+    for (const { candidate, pngDataUrl, svgDataUrl } of fallbackResults) {
+      if (pngDataUrl || svgDataUrl) {
+        renderedFallbacks[candidate.nodeId] = {
+          ...(pngDataUrl ? { pngDataUrl } : {}),
+          ...(svgDataUrl ? { svgDataUrl } : {}),
+          reasons: candidate.reasons,
+        };
+      }
+      if (!pngDataUrl) warnings.push(`Unable to render pixel fallback ${candidate.nodeId}.`);
+      if (!svgDataUrl) warnings.push(`Unable to render vector fallback ${candidate.nodeId}.`);
+    }
   }
 
   const fileKey = figma.fileKey ?? null;
-  const sourceUrl = fileKey
-    ? `https://www.figma.com/file/${fileKey}?node-id=${encodeURIComponent(request.nodeIds[0] ?? request.rootId)}`
-    : null;
+  const sourceUrl = buildFigmaNodeUrl(fileKey, request.nodeIds[0] ?? request.rootId);
   figma.ui.postMessage({
     type: 'capture-reference-data',
     protocolVersion: PROTOCOL_VERSION,
@@ -400,6 +586,7 @@ async function exportCapture(
     sourceUrl,
     references,
     assets,
+    renderedFallbacks,
     warnings,
   } satisfies SandboxMessage);
 }
@@ -460,7 +647,7 @@ figma.ui.onmessage = (msg: UIMessage) => {
   } else if (msg.type === 'export-images' && lastNormalized) {
     const exportId = ++currentExportId;
     if (msg.mode === 'merged') {
-      exportMerged(lastNormalized.id, msg.scale, msg.format, exportId);
+      exportMerged(lastNormalized, msg.scale, msg.format, exportId);
     } else if (msg.mode === 'per-selection') {
       exportPerSelection(msg.scale, msg.format, exportId);
     } else {

@@ -22,7 +22,7 @@
     // @figma/plugin-typings is a scoped package (not under @types/…) so we rely
     // on default type acquisition (do NOT set typeRoots here) and pull the
     // global Figma API declarations explicitly.
-    "types": ["@figma/plugin-typings"],
+    "types": ["@figma/plugin-typings", "node"],
     "paths": {
       "@shared/*": ["./src/shared/*"]
     }

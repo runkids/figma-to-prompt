@@ -10,6 +10,8 @@ import {
   buildGeometryChecklist,
   buildFidelityRiskSummary,
   buildFidelityWarningsSection,
+  buildInteractionContractSection,
+  buildComponentApiSection,
 } from '../src/ui/prompt';
 import type { UISerializedNode } from '../src/shared/types';
 
@@ -30,6 +32,64 @@ const sampleNode: UISerializedNode = {
     },
   ],
 };
+
+describe('behavior contracts', () => {
+  it('emits prototype reactions and component API metadata without visual inference', () => {
+    const node: UISerializedNode = {
+      id: 'root',
+      name: 'Checkout',
+      type: 'COMPONENT',
+      layout: { width: 320, height: 180 },
+      descriptionMarkdown: '**Checkout** form',
+      documentationLinks: ['https://design.example.com/checkout'],
+      componentPropertyDefinitions: {
+        Disabled: { type: 'BOOLEAN', defaultValue: false },
+      },
+      prototype: {
+        overflowDirection: 'vertical',
+        fixedChildIds: ['button'],
+        overlayPositionType: 'bottom-center',
+        overlayBackgroundInteraction: 'close-on-click-outside',
+      },
+      annotations: [{ labelMarkdown: '**Keep CTA visible**', properties: ['fills'] }],
+      variableBindings: {
+        opacity: { id: 'VariableID:opacity', name: 'Opacity/Disabled' },
+      },
+      explicitVariableModes: [{
+        collectionId: 'VariableCollectionId:theme',
+        collectionName: 'Theme',
+        modeId: 'VariableModeId:dark',
+        modeName: 'Dark',
+      }],
+      children: [{
+        id: 'button',
+        name: 'Submit',
+        type: 'FRAME',
+        reactions: [{
+          trigger: { type: 'ON_CLICK' },
+          actions: [{ type: 'URL', url: 'https://example.com/pay' }],
+        }],
+      }],
+    };
+
+    expect(buildInteractionContractSection(node)).toContain(
+      '`Checkout > Submit` (`button`): trigger `{"type":"ON_CLICK"}`; actions `[{"type":"URL","url":"https://example.com/pay"}]`',
+    );
+    expect(buildInteractionContractSection(node)).toContain(
+      '`Checkout` (`root`) prototype settings: `{"overflowDirection":"vertical","fixedChildIds":["button"],"overlayPositionType":"bottom-center","overlayBackgroundInteraction":"close-on-click-outside"}`',
+    );
+    const componentSection = buildComponentApiSection(node);
+    expect(componentSection).toContain('**Checkout** form');
+    expect(componentSection).toContain('https://design.example.com/checkout');
+    expect(componentSection).toContain('"Disabled":{"type":"BOOLEAN","defaultValue":false}');
+    expect(componentSection).toContain('**Keep CTA visible**');
+    expect(componentSection).toContain('Opacity/Disabled');
+    expect(componentSection).toContain('"modeName":"Dark"');
+    const prompt = buildPrompt(node, { promptDetail: 'compact' });
+    expect(prompt).toContain('## Interaction Contract');
+    expect(prompt).toContain('## Component API Contract');
+  });
+});
 
 const richNode: UISerializedNode = {
   id: '10',
@@ -203,7 +263,8 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('# Pixel-perfect Figma rebuild: Login Card');
     expect(prompt).toContain('pixel-perfect visual fidelity');
     expect(prompt).toContain('## Pixel Perfect Template');
-    expect(prompt).toContain('Capture a screenshot at that same size');
+    expect(prompt).toContain('Capture a lossless PNG screenshot at that same size');
+    expect(prompt).toContain('built-in **Verify AI screenshot** checker');
     expect(prompt).toContain('Do not approximate missing images');
   });
 
@@ -245,6 +306,23 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('paint order');
     expect(prompt).toContain('style.fills');
     expect(prompt).toContain('textStyleRanges');
+  });
+
+  it('explains high-fidelity wrap, grid, size-bound, transform, and text behavior', () => {
+    const prompt = buildPrompt(sampleNode, { promptTemplate: 'pixel-perfect', promptDetail: 'full' });
+
+    expect(prompt).toContain('`layout.wrap: wrap` → `flex-wrap: wrap`');
+    expect(prompt).toContain('`layout.mode: grid` → CSS Grid');
+    expect(prompt).toContain('`gridChildHorizontalAlign/gridChildVerticalAlign`');
+    expect(prompt).toContain('`layout.minWidth/maxWidth/minHeight/maxHeight`');
+    expect(prompt).toContain('`layout.relativeTransform`');
+    expect(prompt).toContain('`style.textAlignVertical`');
+    expect(prompt).toContain('`style.textTruncation: ending`');
+    expect(prompt).toContain('`layout.itemReverseZIndex: true` reverses sibling paint order');
+    expect(prompt).toContain('`layout.renderBounds`');
+    expect(prompt).toContain('`style.cornerSmoothing`');
+    expect(prompt).toContain('`arcData`');
+    expect(prompt).toContain('`style.openTypeFeatures`');
   });
 
   it('omits dependencies section when no instances', () => {
@@ -590,6 +668,7 @@ describe('image assets', () => {
         width: 1200,
         height: 400,
         scaleMode: 'fill',
+        renderSpecific: false,
       }));
       expect(assets[1]).toEqual(expect.objectContaining({
         fileName: 'Hero_Section_Profile_Avatar.png',
@@ -632,6 +711,19 @@ describe('image assets', () => {
       const assets = collectImageAssets(node);
       expect(assets).toHaveLength(2);
       expect(assets.map((a) => a.nodeId)).toEqual(['2', '3']);
+    });
+
+    it('marks duplicate source hashes with different rendered appearances as render-specific', () => {
+      const node: UISerializedNode = {
+        id: '1', name: 'Wrapper', type: 'FRAME',
+        layout: { width: 200, height: 100 },
+        children: [
+          { id: '2', name: 'Small', type: 'RECTANGLE', layout: { width: 50, height: 50 }, style: { imageFillHash: 'same' } },
+          { id: '3', name: 'Wide', type: 'RECTANGLE', layout: { width: 100, height: 50 }, style: { imageFillHash: 'same' } },
+        ],
+      };
+
+      expect(collectImageAssets(node).map((asset) => asset.renderSpecific)).toEqual([true, true]);
     });
 
     it('returns empty array when no images', () => {
@@ -725,6 +817,32 @@ describe('image assets', () => {
         rotation: 90,
         filters: { exposure: 0.2 },
         opacity: 0.8,
+        renderSpecific: true,
+      }));
+    });
+
+    it('preserves effect-inclusive dimensions for final raster density checks', () => {
+      const node: UISerializedNode = {
+        id: '1', name: 'Wrapper', type: 'FRAME',
+        layout: { width: 100, height: 100 },
+        children: [{
+          id: '2',
+          name: 'Shadow photo',
+          type: 'RECTANGLE',
+          layout: {
+            width: 50,
+            height: 40,
+            renderBounds: { x: -8, y: -6, width: 70, height: 64 },
+          },
+          style: { imageFillHash: 'photo' },
+        }],
+      };
+
+      expect(collectImageAssets(node)[0]).toEqual(expect.objectContaining({
+        width: 50,
+        height: 40,
+        renderWidth: 70,
+        renderHeight: 64,
       }));
     });
   });
@@ -805,6 +923,7 @@ describe('image assets', () => {
       expect(prompt).not.toContain('Hero_Section_Profile_Avatar.png');
       // Header should explicitly warn the AI not to reference individual image files
       expect(prompt).toContain('Do NOT reference any individual image files');
+      expect(prompt).toContain('Attach this downloaded file alongside the prompt');
     });
 
     it('adds Assets section for merged even when per-image list is empty', () => {

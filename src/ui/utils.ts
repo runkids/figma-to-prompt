@@ -42,7 +42,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   return false;
 }
 
-/** scale=0 pulls the original PNG raster via getImageByHash, then we transcode
+/** scale=0 returns the original PNG raster when possible, then we transcode
  *  client-side when the user picks a lossy target. When a browser cannot encode
  *  the requested MIME (notably AVIF), canvas falls back to PNG; in that case the
  *  extension must follow the actual data URL so we never save fake .avif files. */
@@ -74,6 +74,7 @@ function dataUrlExt(dataUrl?: string | null): string | null {
     case 'image/svg+xml': return 'svg';
     case 'image/webp': return 'webp';
     case 'image/avif': return 'avif';
+    case 'image/gif': return 'gif';
     default: return null;
   }
 }

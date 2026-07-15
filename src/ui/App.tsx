@@ -3,6 +3,7 @@ import { initialState, reducer } from './state';
 import { buildPrompt, sanitizeFileName } from './prompt';
 import { toSandboxFormat } from './transcode';
 import { PROTOCOL_VERSION } from '../shared/types';
+import { rasterPixelSize } from '../shared/rasterScale';
 import type { ImageDataMessage, SandboxMessage, UIMessage } from '../shared/types';
 import { Header } from './components/Header';
 import { TabBar } from './components/TabBar';
@@ -55,8 +56,9 @@ async function composeMergedTiles(payload: MergedTilesPayload): Promise<string |
 
   const scale = payload.scale;
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(payload.width * scale));
-  canvas.height = Math.max(1, Math.round(payload.height * scale));
+  const pixelSize = rasterPixelSize(payload, scale);
+  canvas.width = pixelSize.width;
+  canvas.height = pixelSize.height;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
@@ -140,13 +142,28 @@ export function App() {
         if (msg.mergedTiles) {
           // Async composite — publish raw without the merged yet so the status
           // bar can show "loading", then fill in once the canvas finishes.
-          dispatch({ type: 'RAW_IMAGES_RECEIVED', images: msg.images, merged: null });
+          dispatch({
+            type: 'RAW_IMAGES_RECEIVED',
+            images: msg.images,
+            merged: null,
+            sourceRasterEvidence: msg.sourceRasterEvidence,
+          });
           void composeMergedTiles(msg.mergedTiles).then((dataUrl) => {
             if (cancelled) return;
-            dispatch({ type: 'RAW_IMAGES_RECEIVED', images: msg.images, merged: dataUrl });
+            dispatch({
+              type: 'RAW_IMAGES_RECEIVED',
+              images: msg.images,
+              merged: dataUrl,
+              sourceRasterEvidence: msg.sourceRasterEvidence,
+            });
           });
         } else {
-          dispatch({ type: 'RAW_IMAGES_RECEIVED', images: msg.images, merged: msg.merged ?? null });
+          dispatch({
+            type: 'RAW_IMAGES_RECEIVED',
+            images: msg.images,
+            merged: msg.merged ?? null,
+            sourceRasterEvidence: msg.sourceRasterEvidence,
+          });
         }
       }
     }

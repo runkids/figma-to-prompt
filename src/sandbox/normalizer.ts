@@ -62,6 +62,8 @@ export function normalizeNode(node: UISerializedNode): UISerializedNode {
   if (result.layout) result.layout = roundDeep(result.layout);
   if (result.style) result.style = roundDeep(result.style);
   if (result.textStyleRanges) result.textStyleRanges = roundDeep(result.textStyleRanges);
+  if (result.textPathStartData) result.textPathStartData = roundDeep(result.textPathStartData);
+  if (result.transformModifiers) result.transformModifiers = roundDeep(result.transformModifiers);
 
   // children: empty → remove; non-empty → recurse
   if (result.children !== undefined) {

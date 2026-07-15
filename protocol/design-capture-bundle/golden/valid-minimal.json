@@ -18,6 +18,13 @@
       "id": "1:23",
       "name": "Header",
       "structurePath": "design/nodes.json",
+      "promptPath": "prompt.md",
+      "primaryReferencePath": "references/header.png",
+      "targetViewport": {
+        "width": 1,
+        "height": 1,
+        "referencePath": "references/header.png"
+      },
       "referencePaths": ["references/header.png"]
     },
     "files": [
@@ -35,7 +42,8 @@
         "mediaType": "image/png",
         "size": 68,
         "sha256": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
-        "nodeId": "1:23"
+        "nodeId": "1:23",
+        "pixelDimensions": { "width": 1, "height": 1 }
       }
     ],
     "warnings": ["Figma file version is unavailable in the plugin sandbox."],

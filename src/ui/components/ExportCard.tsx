@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { Action, State } from '../state';
 import type { ExportMode, ImageFormat } from '../../shared/types';
-import { type ImageAsset, collectImageAssets, collectSelectionAssets, sanitizeFileName } from '../prompt';
+import { type ImageAsset, buildPrompt, collectImageAssets, collectSelectionAssets, sanitizeFileName } from '../prompt';
 import {
   copyToClipboard,
   mergedExt,
@@ -11,7 +11,12 @@ import {
   useFeedback,
 } from '../utils';
 import { createZip, dataUrlToBlob, dataUrlToText, downloadBlob } from '../download';
-import { transcodeDataUrl } from '../transcode';
+import { readImageDimensions, transcodeDataUrl } from '../transcode';
+import {
+  assertMinimumRasterDensity,
+  assertMinimumSourceRasterDensity,
+  MIN_SHARP_RASTER_SCALE,
+} from '../../shared/rasterScale';
 import {
   type FsaDirectoryHandle,
   ensurePermission,
@@ -22,10 +27,16 @@ import {
 import { loadDirHandle, saveDirHandle } from '../storage';
 import { ButtonGroup } from './ButtonGroup';
 import { HelpTip } from './HelpTip';
+import { VisualCompareCard } from './VisualCompareCard';
 import {
   createDesignCaptureBundle,
   requestCaptureReference,
 } from '../designCapture';
+import {
+  buildCaptureReferenceSource,
+  compareImageSources,
+  requireStableReference,
+} from '../visualCompare';
 
 declare const __APP_VERSION__: string;
 
@@ -169,6 +180,10 @@ function QualityRow({ quality, onChange }: QualityRowProps) {
     <div class="quality-row">
       <div class="quality-row-line">
         <span class="quality-label">Quality</span>
+        <HelpTip
+          label="Lossy format warning"
+          text="JPG, WebP, and AVIF can soften edges even at 100%. Use PNG when exact pixels or maximum sharpness matter."
+        />
         <div class="quality-presets" role="group" aria-label="Quality presets">
           {QUALITY_PRESETS.map((p) => {
             const active = p === activePreset;
@@ -585,6 +600,7 @@ interface DownloadButtonProps {
 
 function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps) {
   const [feedback, flash] = useFeedback<number>();
+  const [error, setError] = useState<string | null>(null);
   // Track the in-flight save so the button can show a loading state for large
   // images — previously the whole path (data URL → Blob → FSA write) ran
   // synchronously-looking, leaving the button label unchanged for up to
@@ -594,18 +610,37 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
   const loadedCount = state.mode === 'merged'
     ? (state.mergedImage ? 1 : 0)
     : Object.keys(state.images).length;
-  const disabled = !state.data || loadedCount === 0 || saving;
+  const disabled = !state.data || loadedCount === 0 || saving || state.imageExportPending;
+
+  useEffect(() => {
+    setError(null);
+  }, [state.data?.id, state.format, state.mode, state.scale]);
 
   async function handleClick() {
     if (!state.data || saving) return;
 
     setSaving(true);
+    setError(null);
     // Yield one frame so the "Saving…" label & disabled state paint before we
     // start anything CPU-heavy. Without this, the first heavy task can start
     // before the browser repaints, so the loading state is invisible.
     await new Promise((r) => requestAnimationFrame(() => r(undefined)));
 
     try {
+      if (state.format !== 'SVG') {
+        const requiredSourceScale = state.scale === 0
+          ? MIN_SHARP_RASTER_SCALE
+          : state.scale;
+        for (const asset of collectImageAssets(state.data)) {
+          if (state.scale === 0 && !asset.renderSpecific) continue;
+          assertMinimumSourceRasterDensity(
+            state.sourceRasterEvidence[asset.nodeId],
+            requiredSourceScale,
+            asset.nodeName,
+          );
+        }
+      }
+
       // 1. Build outputs. In merged mode: one composite file.
       //    In per-image mode: individual files if writing to a chosen folder
       //    (user picked a folder → they want files, not a zip), or the legacy
@@ -618,6 +653,15 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
         if (!source) return;
         const base = state.mergedImageName.trim() || sanitizeFileName(state.data.name);
         const dataUrl = await transcodeDataUrl(source, state.format, state.quality);
+        if (state.format !== 'SVG' && state.data.layout && state.scale > 0) {
+          const logicalSize = state.data.layout.renderBounds ?? state.data.layout;
+          assertMinimumRasterDensity(
+            await readImageDimensions(dataUrl),
+            logicalSize,
+            state.scale,
+            state.data.name,
+          );
+        }
         const blob = await dataUrlToBlob(dataUrl);
         outputs.push({
           name: `${base}.${mergedExt(state.format, dataUrl)}`,
@@ -635,6 +679,25 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
           const source = state.rawImages[asset.nodeId] ?? state.images[asset.nodeId];
           if (!source) continue;
           const dataUrl = await transcodeDataUrl(source, state.format, state.quality);
+          const minimumScale = state.scale === 0
+            ? asset.renderSpecific ? MIN_SHARP_RASTER_SCALE : 0
+            : state.scale;
+          if (
+            state.format !== 'SVG'
+            && minimumScale > 0
+            && asset.width > 0
+            && asset.height > 0
+          ) {
+            assertMinimumRasterDensity(
+              await readImageDimensions(dataUrl),
+              {
+                width: asset.renderWidth ?? asset.width,
+                height: asset.renderHeight ?? asset.height,
+              },
+              minimumScale,
+              asset.nodeName,
+            );
+          }
           const ext = perImageExt(state.scale, state.format, dataUrl);
           const blob = await dataUrlToBlob(dataUrl);
           const buffer = await blob.arrayBuffer();
@@ -677,12 +740,16 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
         for (const o of outputs) downloadBlob(o.name, o.blob);
       }
       flash(feedbackCount);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Image sharpness verification failed.');
     } finally {
       setSaving(false);
     }
   }
 
-  const label = saving
+  const label = state.imageExportPending
+    ? 'Preparing…'
+    : saving
     ? 'Saving…'
     : feedback != null
       ? `${feedback} saved!`
@@ -694,31 +761,61 @@ function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps)
       : 'btn-candy btn-candy-sm';
 
   return (
-    <button class={cls} disabled={disabled} onClick={handleClick}>
-      {saving && <span class="btn-spinner" aria-hidden="true" />}
-      {label}
-    </button>
+    <div class="capture-download">
+      <button class={cls} disabled={disabled} onClick={handleClick}>
+        {saving && <span class="btn-spinner" aria-hidden="true" />}
+        {label}
+      </button>
+      {error && <div class="visual-compare-error" role="alert">{error}</div>}
+    </div>
   );
 }
 
 function DownloadCaptureButton({ state }: { state: State }) {
   const [saving, setSaving] = useState(false);
   const [feedback, flash] = useFeedback<'saved' | 'failed'>();
+  const [error, setError] = useState<string | null>(null);
   const disabled = !state.data || saving;
+
+  useEffect(() => {
+    setError(null);
+  }, [state.data?.id]);
 
   async function handleClick() {
     if (!state.data || saving) return;
     setSaving(true);
+    setError(null);
     try {
       const capture = await requestCaptureReference(state.data);
+      const referenceDataUrl = await buildCaptureReferenceSource(state.data, capture);
+      if (!referenceDataUrl) throw new Error('Figma could not render the authoritative reference.');
+      const secondCapture = await requestCaptureReference(state.data, { includeAssets: false });
+      const secondReferenceDataUrl = await buildCaptureReferenceSource(state.data, secondCapture);
+      if (!secondReferenceDataUrl) throw new Error('Figma could not repeat the authoritative reference render.');
+      const referenceStability = requireStableReference(
+        await compareImageSources(referenceDataUrl, secondReferenceDataUrl),
+      );
+      const compositeReferenceDataUrl = state.data.id === '__multi_selection__'
+        ? referenceDataUrl
+        : undefined;
+      const prompt = buildPrompt(state.data, {
+        imageNameOverrides: state.nameOverrides,
+        mockImagePaths: state.mockImagePaths,
+        promptTemplate: 'pixel-perfect',
+        promptDetail: 'full',
+      });
       const bundle = await createDesignCaptureBundle({
         root: state.data,
         capture,
+        compositeReferenceDataUrl: compositeReferenceDataUrl ?? undefined,
+        prompt,
         producerVersion: __APP_VERSION__,
+        referenceStability,
       });
       downloadBlob(bundle.filename, bundle.blob);
       flash('saved');
-    } catch {
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Figma could not build the AI package.');
       flash('failed');
     } finally {
       setSaving(false);
@@ -728,15 +825,18 @@ function DownloadCaptureButton({ state }: { state: State }) {
   const label = saving
     ? 'Capturing…'
     : feedback === 'saved'
-      ? 'Capture saved!'
+      ? 'AI package saved!'
       : feedback === 'failed'
-        ? 'Capture failed'
-        : 'Download capture';
+        ? 'AI package failed'
+        : 'Download AI package';
 
   return (
-    <button type="button" class="btn-secondary" disabled={disabled} onClick={handleClick}>
-      {label}
-    </button>
+    <div class="capture-download">
+      <button type="button" class="btn-secondary" disabled={disabled} onClick={handleClick}>
+        {label}
+      </button>
+      {error && <div class="visual-compare-error" role="alert">{error}</div>}
+    </div>
   );
 }
 
@@ -781,6 +881,16 @@ export function ExportCard({ state, dispatch }: Props) {
   const scaleOptions = SCALE_OPTIONS.map((o) => ({ ...o, disabled: o.value === '0' && origForbidden }));
   const modeOptions = MODE_OPTIONS.map((o) => ({ ...o, disabled: o.value === 'per-image' && imageAssets.length === 0 }));
   const showQuality = LOSSY_FORMATS.has(state.format);
+  const requiredSourceScale = state.scale === 0 ? MIN_SHARP_RASTER_SCALE : state.scale;
+  const sourceDensityProblems = state.format !== 'SVG'
+    ? imageAssets.filter((asset) => {
+        if (state.scale === 0 && !asset.renderSpecific) return false;
+        const evidence = state.sourceRasterEvidence[asset.nodeId];
+        return !evidence?.verified
+          || !Number.isFinite(evidence.density)
+          || (evidence.density as number) + 0.01 < requiredSourceScale;
+      })
+    : [];
 
   const namesToggleText = state.mode === 'merged'
     ? 'Rename file'
@@ -848,6 +958,12 @@ export function ExportCard({ state, dispatch }: Props) {
 
       {fsaSupported && <FolderPickerRow dir={dirHandle} onPick={handlePickDirectory} />}
 
+      {sourceDensityProblems.length > 0 && !state.imageExportPending && (
+        <div class="source-density-warning" role="alert">
+          {sourceDensityProblems.length} image{sourceDensityProblems.length === 1 ? '' : 's'} cannot prove {requiredSourceScale}× real source detail for this export. Download is stopped until the source image is replaced or reloaded at higher resolution.
+        </div>
+      )}
+
       {state.format === 'SVG' ? (
         <div class="export-actions">
           <CopySvgButton state={state} />
@@ -857,6 +973,9 @@ export function ExportCard({ state, dispatch }: Props) {
         <DownloadButton state={state} dirHandle={dirHandle} fsaSupported={fsaSupported} />
       )}
       <DownloadCaptureButton state={state} />
+      {state.mode === 'merged' && (
+        <VisualCompareCard root={state.data} />
+      )}
     </section>
   );
 }

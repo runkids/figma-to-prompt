@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { transcodeDataUrl } from '../src/ui/transcode';
+import { readImageDimensions, transcodeDataUrl } from '../src/ui/transcode';
 import { encode } from '@jsquash/avif';
 
 vi.mock('@jsquash/avif', () => ({
@@ -92,6 +92,15 @@ describe('transcodeDataUrl', () => {
     expect(encode).toHaveBeenCalledWith(imageData, expect.objectContaining({ cqLevel: 13, speed: 6 }));
     expect(toBlob).not.toHaveBeenCalled();
     expect(result).toBe('data:image/avif;base64,AQID');
+  });
+
+  it('reads the final encoded raster dimensions from the browser decoder', async () => {
+    installCanvasTranscodeMocks('image/png');
+
+    await expect(readImageDimensions('data:image/png;base64,encoded')).resolves.toEqual({
+      width: 12,
+      height: 8,
+    });
   });
 
   it('passes WebP quality through to canvas.toBlob', async () => {

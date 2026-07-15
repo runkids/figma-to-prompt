@@ -230,6 +230,115 @@ export function collectComponentDeps(node: UISerializedNode): string[] {
   return [...deps].sort();
 }
 
+// ── Behavior Contracts ───────────────────────────────────
+
+function nodePathLabel(path: string[]): string {
+  return path.join(' > ');
+}
+
+export function buildInteractionContractSection(node: UISerializedNode): string {
+  const contracts: string[] = [];
+
+  function walk(n: UISerializedNode, path: string[]): void {
+    if (n.visible === false) return;
+
+    if (n.prototype) {
+      contracts.push(
+        `- \`${nodePathLabel(path)}\` (\`${n.id}\`) prototype settings: \`${JSON.stringify(n.prototype)}\``,
+      );
+    }
+
+    for (const reaction of n.reactions ?? []) {
+      contracts.push(
+        `- \`${nodePathLabel(path)}\` (\`${n.id}\`): trigger \`${JSON.stringify(reaction.trigger)}\`; actions \`${JSON.stringify(reaction.actions)}\``,
+      );
+    }
+
+    n.children?.forEach((child) => walk(child, [...path, child.name]));
+  }
+
+  walk(node, [node.name]);
+  if (contracts.length === 0) return '';
+
+  return [
+    '## Interaction Contract',
+    'Implement these Figma prototype settings and reactions explicitly. Preserve scrolling, fixed layers, overlay behavior, trigger/action order, and transitions; do not infer a different behavior from appearance or node names.',
+    ...contracts,
+  ].join('\n');
+}
+
+export function buildComponentApiSection(node: UISerializedNode): string {
+  const contracts: string[] = [];
+
+  function walk(n: UISerializedNode, path: string[]): void {
+    if (n.visible === false) return;
+
+    const hasMetadata = Boolean(
+      n.descriptionMarkdown
+      || n.description
+      || n.documentationLinks?.length
+      || n.componentPropertyDefinitions
+      || n.componentPropertyDetails
+      || n.componentPropertyReferences
+      || n.annotations?.length
+      || n.variableBindings
+      || n.explicitVariableModes?.length
+      || n.referencedVariables?.length,
+    );
+
+    if (hasMetadata) {
+      contracts.push(`### ${nodePathLabel(path)} (\`${n.id}\`)`);
+      if (n.descriptionMarkdown) {
+        contracts.push(`- Description: ${n.descriptionMarkdown}`);
+      } else if (n.description) {
+        contracts.push(`- Description: ${n.description}`);
+      }
+      for (const url of n.documentationLinks ?? []) {
+        contracts.push(`- Documentation: ${url}`);
+      }
+      if (n.componentPropertyDefinitions) {
+        contracts.push(`- Property definitions: \`${JSON.stringify(n.componentPropertyDefinitions)}\``);
+      }
+      if (n.componentPropertyDetails) {
+        contracts.push(`- Active property values: \`${JSON.stringify(n.componentPropertyDetails)}\``);
+      }
+      if (n.componentPropertyReferences) {
+        contracts.push(`- Sublayer property references: \`${JSON.stringify(n.componentPropertyReferences)}\``);
+      }
+      for (const annotation of n.annotations ?? []) {
+        const label = annotation.labelMarkdown ?? annotation.label ?? '(unlabelled annotation)';
+        const metadata = {
+          ...(annotation.properties?.length ? { properties: annotation.properties } : {}),
+          ...(annotation.categoryId ? { categoryId: annotation.categoryId } : {}),
+        };
+        contracts.push(
+          `- Developer annotation: ${label}${Object.keys(metadata).length > 0 ? ` — \`${JSON.stringify(metadata)}\`` : ''}`,
+        );
+      }
+      if (n.variableBindings) {
+        contracts.push(`- Variable bindings: \`${JSON.stringify(n.variableBindings)}\``);
+      }
+      if (n.explicitVariableModes) {
+        contracts.push(`- Explicit variable modes: \`${JSON.stringify(n.explicitVariableModes)}\``);
+      }
+      if (n.referencedVariables) {
+        contracts.push(`- Referenced variable catalog: \`${JSON.stringify(n.referencedVariables)}\``);
+      }
+    }
+
+    n.children?.forEach((child) => walk(child, [...path, child.name]));
+  }
+
+  walk(node, [node.name]);
+  if (contracts.length === 0) return '';
+
+  return [
+    '## Component API Contract',
+    'Use the documented component properties as the public API. Preserve typed defaults, variants, and active values instead of coercing them from labels.',
+    ...contracts,
+  ].join('\n');
+}
+
 // ── Fidelity Risk Summary ────────────────────────────────
 
 interface FidelityRiskStats {
@@ -455,12 +564,16 @@ export interface ImageAsset {
   nodeName: string;
   width: number;
   height: number;
+  renderWidth?: number;
+  renderHeight?: number;
   scaleMode?: string;
   opacity?: number;
   transform?: UITransform;
   scalingFactor?: number;
   rotation?: number;
   filters?: UIImageFilters;
+  /** Orig must be rasterized rather than returning raw uploaded bytes. */
+  renderSpecific?: boolean;
 }
 
 export function collectImageAssets(
@@ -487,12 +600,15 @@ export function collectImageAssets(
         nodeName: n.name,
         width: Math.round(n.layout?.width ?? 0),
         height: Math.round(n.layout?.height ?? 0),
+        renderWidth: Math.round(n.layout?.renderBounds?.width ?? n.layout?.width ?? 0),
+        renderHeight: Math.round(n.layout?.renderBounds?.height ?? n.layout?.height ?? 0),
         scaleMode: n.style.imageFillScaleMode,
         opacity: n.style.imageFillOpacity,
         transform: n.style.imageFillTransform,
         scalingFactor: n.style.imageFillScalingFactor,
         rotation: n.style.imageFillRotation,
         filters: n.style.imageFillFilters,
+        renderSpecific: hasRenderSpecificImagePaint(n),
       });
     }
     n.children?.forEach((child) => walk(child, n.name));
@@ -502,6 +618,13 @@ export function collectImageAssets(
 
   // Disambiguate any remaining duplicate fileNames with index suffix
   const result = [...assets.values()];
+  const appearancesByHash = new Map<string, number>();
+  for (const asset of result) {
+    if (asset.hash) appearancesByHash.set(asset.hash, (appearancesByHash.get(asset.hash) ?? 0) + 1);
+  }
+  for (const asset of result) {
+    if (asset.hash && (appearancesByHash.get(asset.hash) ?? 0) > 1) asset.renderSpecific = true;
+  }
   const nameCount = new Map<string, number>();
   for (const a of result) nameCount.set(a.fileName, (nameCount.get(a.fileName) ?? 0) + 1);
   const nameIdx = new Map<string, number>();
@@ -534,6 +657,8 @@ export function collectSelectionAssets(
       nodeName: child.name,
       width: Math.round(child.layout?.width ?? 0),
       height: Math.round(child.layout?.height ?? 0),
+      renderWidth: Math.round(child.layout?.renderBounds?.width ?? child.layout?.width ?? 0),
+      renderHeight: Math.round(child.layout?.renderBounds?.height ?? child.layout?.height ?? 0),
     } satisfies ImageAsset;
   });
 
@@ -797,25 +922,51 @@ function formatTypoLine(t: TypoEntry): string {
   return line;
 }
 
-function buildVisualVerificationSection(node: UISerializedNode, hasMergedAsset: boolean): string {
+function buildVisualVerificationSection(
+  node: UISerializedNode,
+  hasMergedAsset: boolean,
+  requireVisualDiff: boolean,
+): string {
   const size = node.layout
     ? `${formatNumber(node.layout.width)}×${formatNumber(node.layout.height)}`
     : 'the extracted root size';
   const lines = [
     '## Implementation Checks',
     `- Build against one exact ${size} viewport with \`html, body { margin: 0; }\` and global \`box-sizing: border-box\`.`,
-    '- Use the Geometry Checklist as a lightweight self-check before styling polish; screenshot diff tooling is optional for complex frames.',
+    requireVisualDiff
+      ? '- Screenshot comparison against the reference render is required; do not declare completion from code inspection alone.'
+      : '- Use the Geometry Checklist as a lightweight self-check before styling polish; use screenshot comparison for complex frames.',
     '- For text, set explicit `font-size`, `font-weight`, `line-height`, and CSS `letter-spacing`; convert percent letter spacing to px from the font size.',
     '- For mixed text, use `textStyleRanges` to split spans and preserve range-level fills, styles, links, and paragraph/list metadata.',
     '- For `layout.mode: none`, position children from their `layout.x/y` offsets relative to the parent.',
+    '- `layout.wrap: wrap` → `flex-wrap: wrap`; use `counterAxisSpacing` as the wrapped-track gap and preserve `counterAxisAlignContent`.',
+    '- `layout.mode: grid` → CSS Grid; map row/column counts, gaps, track sizes, anchors, spans, and `gridChildHorizontalAlign/gridChildVerticalAlign` exactly.',
+    '- Apply `layout.minWidth/maxWidth/minHeight/maxHeight` as CSS size bounds without replacing the extracted fixed target size.',
+    '- Preserve `layout.relativeTransform` for rotation/skew; use `layout.x/y` as the containing-parent offset and avoid applying translation twice.',
+    '- `layout.renderBounds` is the effect/stroke-inclusive box relative to the regular node box; use its offset and size when positioning a rendered fallback or checking visual overflow.',
     '- For `layout.layoutPositioning: absolute`, remove that node from the parent flex flow and position it by `layout.x/y` even when the parent uses auto layout.',
+    '- `layout.itemReverseZIndex: true` reverses sibling paint order; otherwise later JSON siblings paint above earlier siblings.',
+    '- Preserve `style.textAlignVertical` inside fixed text boxes and map `style.textAutoResize` to wrapping/intrinsic sizing behavior.',
+    '- `style.textTruncation: ending` requires an ellipsis; combine it with `style.maxLines` using deterministic line clamping.',
+    '- Preserve `style.textDecorationStyle`, offset, thickness, color, and skip-ink behavior; a plain underline is not equivalent to a wavy or dotted decoration.',
+    '- Preserve the exact font face from `style.fontStyleName`, map `style.openTypeFeatures` to `font-feature-settings`, and honor paragraph/list/hanging/leading-trim metadata.',
+    '- Preserve `prototype.overflowDirection`, `fixedChildIds`, and overlay settings as runtime behavior; fixed layers stay above scrolling content.',
+    '- Treat `annotations`, `componentPropertyReferences`, `variableBindings`, `explicitVariableModes`, and `referencedVariables` as developer-authored implementation constraints.',
+    '- `style.cornerSmoothing` is a Figma squircle, not a plain CSS rounded rectangle; use the bundled fallback or exact superellipse geometry when required.',
+    '- Rebuild partial ellipses and donut shapes from `arcData` instead of rendering a full oval.',
     '- Preserve paint metadata such as fill opacity, image crop transforms, image filters, and gradient transforms when present in `style`.',
+    '- `style.advancedEffects` records Figma noise, texture, and glass parameters. Treat the node-matched rendered fallback as authoritative because plain CSS cannot reproduce these effects exactly.',
+    '- Any critical `unsupported-fill-*` or `unsupported-effect-*` warning means the known node contains a visual feature the native implementation must not silently drop.',
+    '- Multiple visible fills/strokes and Figma linear-burn/linear-dodge compositing are critical fallback cases; browser background layers or blend modes are not accepted as pixel-equivalent evidence.',
     '- Preserve stroke metadata such as stroke alignment, caps, joins, dash pattern, miter limit, and side-specific stroke weights when present in `style`.',
     '- Render exact SVG paths from `vectorPaths`, `fillGeometry`, or `strokeGeometry` when present; do not replace them with approximate icons.',
+    '- For `TEXT_PATH`, place the exact text on `vectorPaths` beginning at `textPathStartData`; use the bundled rendered fallback if browser text-path metrics differ.',
+    '- For `TRANSFORM_GROUP`, reproduce every `transformModifiers` repeat in order, including repeat type, count, axis, offset, and whether the offset uses px or relative units.',
+    '- Give the final exact-size screenshot to the user so they can run Figma to Prompt\'s built-in **Verify AI screenshot** checker.',
   ];
 
   if (hasMergedAsset) {
-    lines.push('- Use the attached composite image as visual reference only; do not crop it into runtime assets.');
+    lines.push('- Use the separately attached whole-frame composite as visual reference only; do not crop it into runtime assets.');
   }
 
   return lines.join('\n');
@@ -826,7 +977,7 @@ function buildPixelPerfectTemplateSection(node: UISerializedNode, hasMergedAsset
     ? `${formatNumber(node.layout.width)}×${formatNumber(node.layout.height)}`
     : 'the extracted root size';
   const referenceLine = hasMergedAsset
-    ? '- Use the attached whole-frame composite image as the visual source of truth.'
+    ? '- Export/download the whole-frame composite and attach it alongside this prompt as the visual source of truth.'
     : '- If a whole-frame reference image is supplied separately, use it as the visual source of truth.';
   const assetLine = hasMockPaths
     ? '- Use every listed mock image path exactly; do not generate, crop from memory, or replace those images.'
@@ -848,9 +999,9 @@ function buildPixelPerfectTemplateSection(node: UISerializedNode, hasMergedAsset
     '',
     '### Verification Loop',
     '1. Implement the frame at the exact target size.',
-    '2. Capture a screenshot at that same size.',
-    '3. Compare it against the reference image.',
-    '4. Fix visible differences in position, size, color, typography, image crop, vector geometry, and z-order.',
+    '2. Capture a lossless PNG screenshot at that same size; do not use JPEG/WebP compression.',
+    '3. Compare it against the reference image; give the screenshot to the user for Figma to Prompt\'s built-in **Verify AI screenshot** checker.',
+    '4. If the checker reports a non-zero diff, download its correction ZIP and use reference.png, candidate.png, visual-diff.png, and verification.json to fix position, size, color, typography, image crop, vector geometry, and z-order.',
     '5. Repeat until the screenshot is visually indistinguishable.',
     '',
     'Do not approximate missing images, icons, logos, or text. If a required path or asset cannot be loaded, stop and ask for the correct input.',
@@ -897,10 +1048,16 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
 - Reproduce this component with ${promptTemplate === 'pixel-perfect' ? '**pixel-perfect visual fidelity**' : '**99% fidelity**'} using the JSON spec below
 - Use semantic HTML elements
 - The JSON contains the full node tree with layout, style, and children
-- Preserve JSON child order as paint order; later siblings render above earlier siblings
+- Preserve JSON child order as paint order unless the parent has \`layout.itemReverseZIndex: true\`; normally later siblings render above earlier siblings
 - Preserve \`style.fills\` and \`style.strokes\` paint-stack order when present; convenience fields like \`backgroundColor\` and \`imageFillHash\` only summarize the first renderable paints
 - Preserve \`textStyleRanges\` when present; node-level text style is only the common/default style
+- Preserve \`reactions\` as the interaction contract; implement every trigger/action in order instead of inferring behavior from pixels or node names
+- Preserve \`prototype\` scrolling, fixed-layer, and overlay settings; these behaviors cannot be recovered from the reference PNG
+- Use \`componentPropertyDefinitions\` as the component's typed public API and \`componentPropertyDetails\` as the active instance values; do not coerce booleans to strings
+- Preserve \`annotations\`, \`componentPropertyReferences\`, \`variableBindings\`, \`explicitVariableModes\`, and \`referencedVariables\` as developer-authored contracts; use the catalog's per-mode values and code syntax for prototype state
 - \`layout.mode\`: horizontal → flex row, vertical → flex column
+- \`layout.wrap: wrap\` → \`flex-wrap: wrap\`; preserve wrapped-track spacing/alignment
+- \`layout.mode: grid\` → CSS Grid with exact tracks, gaps, anchors, and spans
 - \`layout.mode: none\` → position children by \`layout.x/y\` relative to the parent
 - \`layout.layoutPositioning: absolute\` → remove from parent flex flow and position by \`layout.x/y\`
 - \`layout.sizing\`: hug → auto, fill → 100%/flex:1, fixed → explicit px
@@ -958,6 +1115,16 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
     );
   }
 
+  const interactionContract = buildInteractionContractSection(node);
+  if (interactionContract) {
+    sections.push(interactionContract);
+  }
+
+  const componentApi = buildComponentApiSection(node);
+  if (componentApi) {
+    sections.push(componentApi);
+  }
+
   if (promptDetail !== 'compact') {
     const fidelityRiskSummary = buildFidelityRiskSummary(node);
     if (fidelityRiskSummary) {
@@ -989,7 +1156,7 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
   if (merged) {
     const mergedSafe = sanitizeFileName(merged.name);
     sections.push(
-      `## Assets\nA single rendered composite image is attached — use it as a visual reference for the whole frame. Do NOT reference any individual image files; they are already baked into this composite:\n- \`${mergedSafe}.png\` → whole composite (${merged.width}×${merged.height})`,
+      `## Assets\nA single rendered composite image is required as the visual reference for the whole frame. Attach this downloaded file alongside the prompt. Do NOT reference any individual image files; they are already baked into this composite:\n- \`${mergedSafe}.png\` → whole composite (${merged.width}×${merged.height})`,
     );
   } else if (options?.perSelection) {
     const selAssets = collectSelectionAssets(node, options?.imageNameOverrides, options?.mockImagePaths);
@@ -1034,7 +1201,7 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
   }
 
   if (promptDetail !== 'compact') {
-    sections.push(buildVisualVerificationSection(node, Boolean(merged)));
+    sections.push(buildVisualVerificationSection(node, Boolean(merged), promptTemplate === 'pixel-perfect'));
   }
 
   if (promptDetail === 'full') {

@@ -1,7 +1,9 @@
 export type UINodeType =
   | 'FRAME'
   | 'GROUP'
+  | 'TRANSFORM_GROUP'
   | 'TEXT'
+  | 'TEXT_PATH'
   | 'RECTANGLE'
   | 'INSTANCE'
   | 'COMPONENT'
@@ -28,13 +30,125 @@ export interface UISerializedNode {
   componentName?: string;
   /** Variant properties — e.g. { State: "Active", Size: "Large" } */
   componentProperties?: Record<string, string>;
+  componentPropertyDetails?: Record<string, {
+    type: string;
+    value: string | boolean;
+  }>;
+  componentPropertyDefinitions?: Record<string, {
+    type: string;
+    defaultValue: string | boolean;
+    preferredValues?: Array<{ type: string; key: string }>;
+    variantOptions?: string[];
+    description?: string;
+  }>;
+  description?: string;
+  descriptionMarkdown?: string;
+  documentationLinks?: string[];
+  /** Prototype interactions that cannot be recovered reliably from a screenshot. */
+  reactions?: UIPrototypeReaction[];
+  /** Frame presentation behavior that affects scrolling, fixed layers, and overlays. */
+  prototype?: UIPrototypeSettings;
+  /** Dev Mode annotations authored on this node. */
+  annotations?: UIAnnotation[];
+  /** Links component sublayers back to their public component properties. */
+  componentPropertyReferences?: {
+    visible?: string;
+    characters?: string;
+    mainComponent?: string;
+  };
+  /** Complete node-level Figma variable bindings, beyond fill/stroke convenience tokens. */
+  variableBindings?: Record<string, UIVariableBinding>;
+  /** Variable collection modes explicitly selected on this node. */
+  explicitVariableModes?: UIVariableMode[];
+  /** Definitions and per-mode values for variables referenced by this node's bindings or reactions. */
+  referencedVariables?: UIVariableDefinition[];
   /** SVG-compatible vector path data when Figma exposes it for vector-like nodes */
   vectorPaths?: UIVectorPath[];
   fillGeometry?: UIVectorPath[];
   strokeGeometry?: UIVectorPath[];
+  /** Exact sweep and inner-radius geometry for ellipse arcs and donut shapes */
+  arcData?: UIArcData;
+  /** Exact start position for text flowing along `vectorPaths`. */
+  textPathStartData?: { segment: number; position: number };
+  /** Repeat transforms applied by a Figma transform group. */
+  transformModifiers?: UITransformModifier[];
   /** Node-level caveats for Figma features that need special handling downstream */
   fidelityWarnings?: UIFidelityWarning[];
   children?: UISerializedNode[];
+}
+
+export type UIJsonValue = string | number | boolean | null | UIJsonValue[] | {
+  [key: string]: UIJsonValue;
+};
+
+export interface UIPrototypeTrigger {
+  type: string;
+  [key: string]: UIJsonValue;
+}
+
+export interface UIPrototypeAction {
+  type: string;
+  [key: string]: UIJsonValue;
+}
+
+export interface UIPrototypeReaction {
+  trigger: UIPrototypeTrigger | null;
+  actions: UIPrototypeAction[];
+}
+
+export interface UIPrototypeSettings {
+  overflowDirection?: 'none' | 'horizontal' | 'vertical' | 'both';
+  fixedChildIds?: string[];
+  overlayPositionType?:
+    | 'center'
+    | 'top-left'
+    | 'top-center'
+    | 'top-right'
+    | 'bottom-left'
+    | 'bottom-center'
+    | 'bottom-right'
+    | 'manual';
+  overlayBackground?: UIJsonValue;
+  overlayBackgroundInteraction?: 'none' | 'close-on-click-outside';
+}
+
+export interface UIAnnotation {
+  label?: string;
+  labelMarkdown?: string;
+  properties?: string[];
+  categoryId?: string;
+}
+
+export interface UIVariableReference {
+  id: string;
+  name?: string;
+}
+
+export type UIVariableBinding =
+  | UIVariableReference
+  | UIVariableReference[]
+  | Record<string, UIVariableReference>;
+
+export interface UIVariableMode {
+  collectionId: string;
+  collectionName?: string;
+  modeId: string;
+  modeName?: string;
+}
+
+export interface UIVariableDefinition {
+  id: string;
+  name: string;
+  collectionId: string;
+  collectionName?: string;
+  resolvedType?: string;
+  description?: string;
+  scopes?: string[];
+  codeSyntax?: Record<string, string>;
+  valuesByMode?: Record<string, {
+    modeName?: string;
+    value: UIJsonValue;
+  }>;
 }
 
 export interface UIVectorPath {
@@ -42,13 +156,26 @@ export interface UIVectorPath {
   data: string;
 }
 
+export interface UIArcData {
+  startingAngle: number;
+  endingAngle: number;
+  innerRadius: number;
+}
+
 export interface UILayout {
-  mode?: 'horizontal' | 'vertical' | 'none';
+  mode?: 'horizontal' | 'vertical' | 'grid' | 'none';
   width: number;
   height: number;
   x?: number;
   y?: number;
   rotation?: number;
+  relativeTransform?: UITransform;
+  /** Effect/stroke-inclusive bounds relative to the node's regular bounding box. */
+  renderBounds?: { x: number; y: number; width: number; height: number };
+  minWidth?: number;
+  maxWidth?: number;
+  minHeight?: number;
+  maxHeight?: number;
   constraints?: {
     horizontal: 'min' | 'center' | 'max' | 'stretch' | 'scale';
     vertical: 'min' | 'center' | 'max' | 'stretch' | 'scale';
@@ -58,6 +185,10 @@ export interface UILayout {
   layoutAlign?: 'min' | 'center' | 'max' | 'stretch' | 'inherit';
   layoutGrow?: number;
   gap?: number;
+  wrap?: 'wrap';
+  counterAxisSpacing?: number;
+  counterAxisAlignContent?: 'auto' | 'space-between';
+  itemReverseZIndex?: boolean;
   strokesIncludedInLayout?: boolean;
   padding?: {
     top: number;
@@ -71,7 +202,24 @@ export interface UILayout {
     horizontal: 'fixed' | 'hug' | 'fill';
     vertical: 'fixed' | 'hug' | 'fill';
   };
+  gridRowCount?: number;
+  gridColumnCount?: number;
+  gridRowGap?: number;
+  gridColumnGap?: number;
+  gridRowSizes?: UIGridTrackSize[];
+  gridColumnSizes?: UIGridTrackSize[];
+  gridRowAnchorIndex?: number;
+  gridColumnAnchorIndex?: number;
+  gridRowSpan?: number;
+  gridColumnSpan?: number;
+  gridChildHorizontalAlign?: 'min' | 'center' | 'max' | 'auto';
+  gridChildVerticalAlign?: 'min' | 'center' | 'max' | 'auto';
   overflow?: 'hidden';
+}
+
+export interface UIGridTrackSize {
+  type: 'flex' | 'fixed' | 'hug';
+  value?: number;
 }
 
 export interface UIStyle {
@@ -87,6 +235,7 @@ export interface UIStyle {
   color?: string;
   colorOpacity?: number;
   borderRadius?: number;
+  cornerSmoothing?: number;
   borderWidth?: number;
   borderColor?: string;
   borderOpacity?: number;
@@ -106,13 +255,30 @@ export interface UIStyle {
   strokeWeights?: { top: number; right: number; bottom: number; left: number };
   opacity?: number;
   fontFamily?: string;
+  fontStyleName?: string;
   fontSize?: number;
   fontWeight?: number;
+  openTypeFeatures?: Record<string, boolean>;
   lineHeight?: number;
   letterSpacing?: number;
   letterSpacingUnit?: 'px' | 'percent';
   textAlign?: 'left' | 'center' | 'right' | 'justified';
+  textAlignVertical?: 'top' | 'center' | 'bottom';
+  textAutoResize?: 'none' | 'width-and-height' | 'height' | 'truncate';
+  textTruncation?: 'disabled' | 'ending';
+  maxLines?: number;
+  paragraphIndent?: number;
+  paragraphSpacing?: number;
+  listSpacing?: number;
+  hangingPunctuation?: boolean;
+  hangingList?: boolean;
+  leadingTrim?: 'cap-height' | 'none';
   textDecoration?: 'underline' | 'strikethrough';
+  textDecorationStyle?: 'solid' | 'wavy' | 'dotted';
+  textDecorationOffset?: UITextDecorationMeasurement;
+  textDecorationThickness?: UITextDecorationMeasurement;
+  textDecorationColor?: { color?: string; opacity?: number; variable?: string; auto?: true };
+  textDecorationSkipInk?: boolean;
   textCase?: 'upper' | 'lower' | 'title' | 'original';
   textStyleName?: string;
   fillStyleName?: string;
@@ -137,6 +303,7 @@ export interface UIStyle {
     startOffset?: { x: number; y: number };
     endOffset?: { x: number; y: number };
   }>;
+  advancedEffects?: UIAdvancedEffect[];
   /** Gradient fill as CSS-like string — e.g. "linear-gradient(135deg, #F00 0%, #00F 100%)" */
   backgroundGradient?: string;
   backgroundGradientType?: 'linear' | 'radial' | 'angular' | 'diamond';
@@ -160,7 +327,50 @@ export interface UIStyle {
   variables?: Record<string, string>;
 }
 
+export type UIAdvancedEffect =
+  | {
+      type: 'noise';
+      noiseType: 'monotone' | 'duotone' | 'multitone';
+      color: string;
+      colorOpacity?: number;
+      secondaryColor?: string;
+      secondaryColorOpacity?: number;
+      opacity?: number;
+      blendMode?: string;
+      noiseSize: number;
+      density: number;
+    }
+  | {
+      type: 'texture';
+      noiseSize: number;
+      radius: number;
+      clipToShape: boolean;
+    }
+  | {
+      type: 'glass';
+      lightIntensity: number;
+      lightAngle: number;
+      refraction: number;
+      depth: number;
+      dispersion: number;
+      radius: number;
+    };
+
 export type UITransform = [[number, number, number], [number, number, number]];
+
+export interface UITextDecorationMeasurement {
+  unit: 'px' | 'percent' | 'auto';
+  value?: number;
+}
+
+export type UITransformModifier = {
+  type: 'repeat';
+  repeatType: 'linear' | 'radial';
+  count: number;
+  unitType: 'px' | 'relative';
+  offset: number;
+  axis?: 'horizontal' | 'vertical';
+};
 
 export interface UIPaint {
   type: 'solid' | 'gradient' | 'image' | 'video' | 'pattern' | 'unknown';
@@ -206,6 +416,19 @@ export interface UIFidelityWarning {
   severity?: 'info' | 'warning' | 'critical';
 }
 
+export type RenderedFallbackReason =
+  | 'text-rendering'
+  | 'vector-geometry'
+  | 'arc-geometry'
+  | 'corner-smoothing'
+  | 'shadow-rendering'
+  | 'blur-rendering'
+  | 'paint-interpolation'
+  | 'critical-fidelity-warning'
+  | 'context-dependent-effect'
+  | 'transform-modifier'
+  | 'unsupported-node';
+
 export interface UIImageFilters {
   exposure?: number;
   contrast?: number;
@@ -240,12 +463,25 @@ export interface SelectionEmptyMessage {
   type: 'selection-empty';
 }
 
+export interface ImageSourceRasterEvidence {
+  verified: boolean;
+  density?: number;
+  method?: 'fill' | 'fit' | 'crop-transform' | 'crop-fallback' | 'tile-scale';
+  sourceWidth?: number;
+  sourceHeight?: number;
+  renderedWidth: number;
+  renderedHeight: number;
+}
+
 export interface ImageDataMessage {
   type: 'image-data';
   /** Map of nodeId → base64 data URL (e.g. "data:image/png;base64,..."). Empty in merged mode. */
   images: Record<string, string>;
   /** Merged composite image (whole selected node rendered as one image). Only set in merged mode. */
   merged?: string;
+  /** Real source-pixel evidence for render-specific Orig exports. This is
+   *  measured before exportAsync can create interpolated pixels. */
+  sourceRasterEvidence?: Record<string, ImageSourceRasterEvidence>;
   /** Multi-selection merged mode: per-node tiles the UI will composite into a single image.
    *  Sandbox can't render a multi-node selection as one image (no canvas), so it emits
    *  individually exported tiles plus absolute bbox metadata; the UI side assembles. */
@@ -270,6 +506,11 @@ export interface CaptureReferenceDataMessage {
   sourceUrl: string | null;
   references: Record<string, string>;
   assets: Record<string, string>;
+  renderedFallbacks?: Record<string, {
+    pngDataUrl?: string;
+    svgDataUrl?: string;
+    reasons: RenderedFallbackReason[];
+  }>;
   warnings: string[];
 }
 
@@ -311,6 +552,7 @@ export interface ExportCaptureMessage {
   requestId: string;
   rootId: string;
   nodeIds: string[];
+  includeAssets: boolean;
 }
 
 export type UIMessage = ExportImagesMessage | ExportCaptureMessage;

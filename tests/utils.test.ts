@@ -6,6 +6,7 @@ describe('image output extensions', () => {
     expect(perImageExt(1, 'AVIF', 'data:image/png;base64,source')).toBe('png');
     expect(perImageExt(1, 'AVIF', 'data:image/avif;base64,encoded')).toBe('avif');
     expect(perImageExt(1, 'WEBP', 'data:image/webp;base64,encoded')).toBe('webp');
+    expect(perImageExt(0, 'PNG', 'data:image/gif;base64,original')).toBe('gif');
     expect(mergedExt('WEBP', 'data:image/jpeg;base64,encoded')).toBe('jpg');
   });
 

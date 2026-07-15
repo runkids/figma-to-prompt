@@ -829,6 +829,242 @@ body {
   border-radius: 3px;
 }
 
+/* ── Built-in visual verification ────────────────────── */
+.visual-compare-card {
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.visual-compare-summary {
+  padding: 8px 10px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--quaternary) 18%, var(--card));
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.visual-compare-summary::-webkit-details-marker {
+  display: none;
+}
+
+.visual-compare-summary::before {
+  content: '▸ ';
+}
+
+.visual-compare-card[open] .visual-compare-summary::before {
+  content: '▾ ';
+}
+
+.visual-compare-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-top: 2px solid var(--border);
+}
+
+.visual-compare-help {
+  margin: 0;
+  color: var(--muted-fg);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.visual-compare-upload {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.visual-compare-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.visual-compare-file {
+  overflow: hidden;
+  color: var(--muted-fg);
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 10px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-compare-error {
+  padding: 8px;
+  color: #991B1B;
+  background: #FEF2F2;
+  border: 1.5px solid #FCA5A5;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.source-density-warning {
+  padding: 9px 11px;
+  border: 1.5px solid #FCA5A5;
+  border-radius: 8px;
+  background: #FEF2F2;
+  color: #991B1B;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.capture-download {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.visual-compare-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.visual-compare-score {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  color: #9D174D;
+  background: color-mix(in srgb, var(--secondary) 16%, var(--card));
+  border: 2px solid var(--secondary);
+  border-radius: 9px;
+}
+
+.visual-compare-score.exact {
+  color: #065F46;
+  background: color-mix(in srgb, var(--quaternary) 20%, var(--card));
+  border-color: var(--quaternary);
+}
+
+.visual-compare-score span {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.visual-compare-score small {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.visual-compare-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.visual-compare-stats div {
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--muted);
+  border-radius: 7px;
+}
+
+.visual-compare-stats .visual-compare-stat-wide {
+  grid-column: 1 / -1;
+}
+
+.visual-compare-stats dt {
+  color: var(--muted-fg);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.visual-compare-stats dd {
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: var(--fg);
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-compare-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+}
+
+.visual-compare-regions {
+  padding: 7px;
+  background: var(--muted);
+  border-radius: 8px;
+}
+
+.visual-compare-regions-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 10px;
+}
+
+.visual-compare-regions-heading span {
+  color: var(--muted-fg);
+  font-size: 9px;
+}
+
+.visual-compare-regions ol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.visual-compare-regions li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 6px;
+  color: var(--fg);
+  font-size: 9px;
+}
+
+.visual-compare-regions code {
+  font-weight: 700;
+}
+
+.visual-compare-regions small {
+  grid-column: 1 / -1;
+  color: var(--muted-fg);
+  font-size: 8px;
+}
+
+.visual-compare-diff img {
+  width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+  background: #FFFFFF;
+  border: 2px solid var(--fg);
+  border-radius: 8px;
+}
+
+.visual-compare-diff figcaption {
+  color: var(--muted-fg);
+  font-size: 9px;
+  text-align: center;
+}
+
 /* ── Image Names ──────────────────────────────────────── */
 .names-row {
   display: flex;

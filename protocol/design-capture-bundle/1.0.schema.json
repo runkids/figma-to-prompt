@@ -56,17 +56,43 @@
           "type": ["string", "null"],
           "format": "uri",
           "maxLength": 4000
-        }
+        },
+        "locatorPath": { "const": "mcp/figma-locator.json" }
       },
       "additionalProperties": true
     },
     "root": {
       "type": "object",
-      "required": ["id", "name", "structurePath", "referencePaths"],
+      "required": [
+        "id",
+        "name",
+        "structurePath",
+        "promptPath",
+        "primaryReferencePath",
+        "targetViewport",
+        "referencePaths"
+      ],
       "properties": {
         "id": { "type": "string", "minLength": 1, "maxLength": 500 },
         "name": { "type": "string", "minLength": 1, "maxLength": 1000 },
         "structurePath": { "const": "design/nodes.json" },
+        "promptPath": { "const": "prompt.md" },
+        "primaryReferencePath": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "targetViewport": {
+          "type": "object",
+          "required": ["width", "height", "referencePath"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 1, "maximum": 32768 },
+            "height": { "type": "integer", "minimum": 1, "maximum": 32768 },
+            "referencePath": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          },
+          "additionalProperties": false
+        },
+        "fallbackPaths": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        },
         "referencePaths": {
           "type": "array",
           "minItems": 1,
@@ -101,10 +127,71 @@
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
           },
-          "nodeId": { "type": ["string", "null"], "maxLength": 500 }
+          "nodeId": { "type": ["string", "null"], "maxLength": 500 },
+          "purpose": { "type": "string", "enum": ["rendered-fallback"] },
+          "fallbackVariant": { "type": "string", "enum": ["pixel", "vector"] },
+          "fallbackReasons": {
+            "type": "array",
+            "maxItems": 16,
+            "items": { "type": "string", "minLength": 1, "maxLength": 160 }
+          },
+          "pixelDimensions": {
+            "type": "object",
+            "required": ["width", "height"],
+            "properties": {
+              "width": { "type": "integer", "minimum": 1, "maximum": 32768 },
+              "height": { "type": "integer", "minimum": 1, "maximum": 32768 }
+            },
+            "additionalProperties": false
+          }
         },
         "additionalProperties": true
       }
+    },
+    "fidelity": {
+      "type": "object",
+      "required": [
+        "policy",
+        "coveragePath",
+        "candidateNodeCount",
+        "coveredNodeCount",
+        "unresolvedNodeIds",
+        "exactVerification"
+      ],
+      "properties": {
+        "policy": { "const": "fail-closed" },
+        "coveragePath": { "const": "fidelity/coverage.json" },
+        "candidateNodeCount": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "coveredNodeCount": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "unresolvedNodeIds": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        },
+        "exactVerification": {
+          "type": "object",
+          "required": ["required", "method", "referencePath", "referenceStability"],
+          "properties": {
+            "required": { "const": true },
+            "method": { "const": "rgba-pixel-equality" },
+            "referencePath": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "referenceStability": {
+              "type": "object",
+              "required": ["renderCount", "width", "height", "differentPixels", "maxChannelDelta"],
+              "properties": {
+                "renderCount": { "const": 2 },
+                "width": { "type": "integer", "minimum": 1, "maximum": 32768 },
+                "height": { "type": "integer", "minimum": 1, "maximum": 32768 },
+                "differentPixels": { "const": 0 },
+                "maxChannelDelta": { "const": 0 }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     },
     "warnings": {
       "type": "array",

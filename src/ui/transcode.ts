@@ -45,6 +45,16 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+export async function readImageDimensions(src: string): Promise<{ width: number; height: number }> {
+  const image = await loadImage(src);
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    throw new Error('Final image has invalid pixel dimensions.');
+  }
+  return { width, height };
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
