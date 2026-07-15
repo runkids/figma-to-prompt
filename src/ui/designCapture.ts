@@ -480,6 +480,10 @@ export async function createDesignCaptureBundle(input: {
     '## Capture Bundle Inputs (Authoritative)',
     '- Keep this bundle intact. Resolve every path relative to the bundle root.',
     '- Review `mcp/figma-locator.json` before calling a Figma MCP tool. Prefer each node\'s exact `locator.sourceUrl`; otherwise pass its `locator.fileKey` and colon-form `locator.nodeId` through the MCP tool\'s documented inputs.',
+    '- Locator data is for discovery or refresh only. An MCP re-capture creates a new immutable capture; it never replaces the evidence in this bundle.',
+    ...(mcpLocator.resolution === 'local-only'
+      ? ['- This capture has no Figma file key, so MCP cannot reopen its source; rely on the bundled evidence.']
+      : []),
     '- Review `fidelity/coverage.json` before implementation. Every listed node must use its exact pixel fallback or an equivalent implementation proven by the final RGBA comparison.',
     '- Use the reference renders below as the visual source of truth and iterate with screenshot comparison.',
     `- Authoritative target: \`${primaryReferencePath}\` at exactly ${targetViewport.width}×${targetViewport.height} CSS pixels. Do not infer the viewport from Figma's fractional geometry or another asset.`,

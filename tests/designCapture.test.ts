@@ -276,6 +276,8 @@ describe('Design Capture Bundle protocol', () => {
     expect(zipText).toContain('"fileKey":"file-key","nodeId":"1:23"');
     expect(zipText).toContain('https://www.figma.com/design/file-key/figma-to-prompt-capture?node-id=4-56');
     expect(zipText).toContain('Review `mcp/figma-locator.json` before calling a Figma MCP tool');
+    expect(zipText).toContain('Locator data is for discovery or refresh only');
+    expect(zipText).not.toContain('This capture has no Figma file key');
     expect(zipText).toContain('Review `fidelity/coverage.json` before implementation');
     expect(zipText).toContain('Use the PNG variant for the exact 1× target');
     expect(zipText).toContain('built-in `Verify AI screenshot` checker');
@@ -349,6 +351,8 @@ describe('Design Capture Bundle protocol', () => {
     });
     const zipText = new TextDecoder().decode(await bundle.blob.arrayBuffer());
 
+    expect(zipText).toContain('Locator data is for discovery or refresh only');
+    expect(zipText).toContain('This capture has no Figma file key, so MCP cannot reopen its source');
     expect(zipText).toContain('## Interaction Contract');
     expect(zipText).toContain('## Component API Contract');
     expect(zipText).toContain('"fixedChildIds":["1:24"]');
