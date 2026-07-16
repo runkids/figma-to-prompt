@@ -1,4 +1,4 @@
-import { extractNode } from './extractor';
+import { extractNode, warmExtractorCaches } from './extractor';
 import { normalizeNode } from './normalizer';
 import { PROTOCOL_VERSION } from '../shared/types';
 import { getImageAssetKey, hasRenderSpecificImagePaint } from '../shared/imageAssets';
@@ -175,7 +175,7 @@ async function measureSourceRasterEvidence(
     imageNodes,
     CAPTURE_EXPORT_CONCURRENCY,
     async (imageNode): Promise<[string, ImageSourceRasterEvidence]> => {
-      const sceneNode = figma.getNodeById(imageNode.id);
+      const sceneNode = await figma.getNodeByIdAsync(imageNode.id);
       const renderedWidth = sceneNode && 'width' in sceneNode
         ? (sceneNode as SceneNode).width
         : imageNode.width;
@@ -227,7 +227,7 @@ async function exportMerged(
     return;
   }
 
-  const sceneNode = figma.getNodeById(root.id);
+  const sceneNode = await figma.getNodeByIdAsync(root.id);
   if (!sceneNode || !('exportAsync' in sceneNode)) {
     // Don't leave the UI stuck on "loading…"
     if (exportId !== currentExportId) return;
@@ -350,7 +350,7 @@ async function exportImages(
       if (exportId !== currentExportId) return;
       try {
         if (img.renderAtOriginalScale) {
-          const sceneNode = figma.getNodeById(img.id);
+          const sceneNode = await figma.getNodeByIdAsync(img.id);
           if (!sceneNode || !('exportAsync' in sceneNode)) continue;
           const exportable = sceneNode as SceneNode;
           const measured = sourceRasterEvidence[img.id];
@@ -385,7 +385,7 @@ async function exportImages(
     for (const img of imageNodes) {
       if (exportId !== currentExportId) return;
       try {
-        const sceneNode = figma.getNodeById(img.id);
+        const sceneNode = await figma.getNodeByIdAsync(img.id);
         if (!sceneNode || !('exportAsync' in sceneNode)) continue;
         const exportable = sceneNode as SceneNode;
         const bytes = await exportable.exportAsync({
@@ -452,7 +452,7 @@ function topLevelNodeIds(root: UISerializedNode): string[] {
 }
 
 async function exportNodePng(nodeId: string, scale = 1): Promise<string | null> {
-  const node = figma.getNodeById(nodeId);
+  const node = await figma.getNodeByIdAsync(nodeId);
   if (!node || !('exportAsync' in node)) return null;
   try {
     const bytes = await (node as SceneNode).exportAsync({
@@ -468,7 +468,7 @@ async function exportNodePng(nodeId: string, scale = 1): Promise<string | null> 
 }
 
 async function exportNodeSvgFallback(nodeId: string): Promise<string | null> {
-  const node = figma.getNodeById(nodeId);
+  const node = await figma.getNodeByIdAsync(nodeId);
   if (!node || !('exportAsync' in node)) return null;
   try {
     const bytes = await (node as SceneNode).exportAsync({
@@ -593,7 +593,7 @@ async function exportCapture(
 
 // ── Selection Handler ────────────────────────────────────
 
-function handleSelection(): void {
+async function handleSelection(): Promise<void> {
   const exportId = ++currentExportId;
   const selection = figma.currentPage.selection;
 
@@ -603,6 +603,10 @@ function handleSelection(): void {
     figma.ui.postMessage(msg);
     return;
   }
+
+  // dynamic-page: fill the extractor's ID→name caches before the sync walk.
+  await warmExtractorCaches(selection);
+  if (exportId !== currentExportId) return;
 
   // Single vs multi: single selection flows through the original path (preserves
   // exact prior behavior — names, absolute positions, etc. stay unchanged).
@@ -657,7 +661,7 @@ figma.ui.onmessage = (msg: UIMessage) => {
 };
 
 // Run on launch
-handleSelection();
+void handleSelection();
 
 // Re-run when selection changes
-figma.on('selectionchange', handleSelection);
+figma.on('selectionchange', () => { void handleSelection(); });

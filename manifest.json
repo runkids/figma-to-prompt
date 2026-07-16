@@ -1,10 +1,11 @@
 {
   "name": "Figma to Prompt",
-  "id": "figma-to-prompt-plugin",
+  "id": "1659492123754225327",
   "api": "1.0.0",
   "main": "dist/code.js",
   "ui": "dist/ui.html",
   "editorType": ["figma", "dev"],
+  "documentAccess": "dynamic-page",
   "capabilities": ["inspect"],
-  "enablePrivatePluginApi": true
+  "networkAccess": { "allowedDomains": ["none"] }
 }

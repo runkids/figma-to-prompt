@@ -215,13 +215,109 @@ function normalizeConstraint(value: unknown): NonNullable<UILayout['constraints'
   return undefined;
 }
 
+/* ── Dynamic-page compat ─────────────────────────────────
+   Under documentAccess "dynamic-page" the sync by-ID lookups throw.
+   extractNode stays sync, so lookups try the sync API first (tests and
+   plugins without the manifest flag), and on throw fall back to a cache
+   that warmExtractorCaches() fills between a dry run and the real run. */
+const warmCache = {
+  variables: new Map<string, Variable | null>(),
+  collections: new Map<string, VariableCollection | null>(),
+  styles: new Map<string, BaseStyle | null>(),
+  mainComponentNames: new Map<string, string | undefined>(),
+};
+const pending = {
+  variableIds: new Set<string>(),
+  collectionIds: new Set<string>(),
+  styleIds: new Set<string>(),
+  instances: new Map<string, InstanceNode>(),
+};
+
+function lookupVariable(id: string): Variable | null {
+  try {
+    return figma.variables.getVariableById(id);
+  } catch {
+    if (warmCache.variables.has(id)) return warmCache.variables.get(id) ?? null;
+    pending.variableIds.add(id);
+    return null;
+  }
+}
+
+function lookupCollection(id: string): VariableCollection | null {
+  try {
+    return figma.variables.getVariableCollectionById(id);
+  } catch {
+    if (warmCache.collections.has(id)) return warmCache.collections.get(id) ?? null;
+    pending.collectionIds.add(id);
+    return null;
+  }
+}
+
+function lookupStyle(id: string): BaseStyle | null {
+  try {
+    return figma.getStyleById(id);
+  } catch {
+    if (warmCache.styles.has(id)) return warmCache.styles.get(id) ?? null;
+    pending.styleIds.add(id);
+    return null;
+  }
+}
+
+function resolveMainComponentName(n: Record<string, unknown>): string | undefined {
+  try {
+    return (n as { mainComponent?: { name?: string } }).mainComponent?.name;
+  } catch {
+    const id = n.id as string;
+    if (warmCache.mainComponentNames.has(id)) return warmCache.mainComponentNames.get(id);
+    pending.instances.set(id, n as unknown as InstanceNode);
+    return undefined;
+  }
+}
+
+/** Run before extractNode under dynamic-page: a dry extraction records every
+ *  by-ID lookup the sync walk needs, then the allowed async APIs fill the
+ *  cache so the real extraction resolves names without touching sync APIs. */
+export async function warmExtractorCaches(nodes: ReadonlyArray<SceneNode>): Promise<void> {
+  if (typeof figma === 'undefined') return;
+  for (let round = 0; round < 2; round++) {
+    pending.variableIds.clear();
+    pending.collectionIds.clear();
+    pending.styleIds.clear();
+    pending.instances.clear();
+    for (const node of nodes) extractNode(node);
+    if (
+      pending.variableIds.size === 0
+      && pending.collectionIds.size === 0
+      && pending.styleIds.size === 0
+      && pending.instances.size === 0
+    ) return;
+    for (const id of pending.variableIds) {
+      const variable = await figma.variables.getVariableByIdAsync(id).catch(() => null);
+      warmCache.variables.set(id, variable);
+      if (variable) pending.collectionIds.add(variable.variableCollectionId);
+    }
+    for (const id of pending.collectionIds) {
+      warmCache.collections.set(
+        id,
+        await figma.variables.getVariableCollectionByIdAsync(id).catch(() => null),
+      );
+    }
+    for (const id of pending.styleIds) {
+      warmCache.styles.set(id, await figma.getStyleByIdAsync(id).catch(() => null));
+    }
+    for (const [id, instance] of pending.instances) {
+      const main = typeof instance.getMainComponentAsync === 'function'
+        ? await instance.getMainComponentAsync().catch(() => null)
+        : null;
+      warmCache.mainComponentNames.set(id, main?.name);
+    }
+  }
+}
+
 /** Resolve a Figma variable ID to its token name */
 function resolveVariableName(variableId: string): string | undefined {
   if (typeof figma === 'undefined' || !figma.variables) return undefined;
-  try {
-    const variable = figma.variables.getVariableById(variableId);
-    return variable?.name;
-  } catch { return undefined; }
+  return lookupVariable(variableId)?.name;
 }
 
 function resolveVariableAliasName(alias: unknown): string | undefined {
@@ -277,11 +373,9 @@ function extractExplicitVariableModes(value: unknown): UIVariableMode[] | undefi
     let collectionName: string | undefined;
     let modeName: string | undefined;
     if (typeof figma !== 'undefined' && figma.variables) {
-      try {
-        const collection = figma.variables.getVariableCollectionById(collectionId);
-        collectionName = collection?.name;
-        modeName = collection?.modes.find((mode) => mode.modeId === modeId)?.name;
-      } catch { /* preserve IDs when the collection is unavailable */ }
+      const collection = lookupCollection(collectionId);
+      collectionName = collection?.name;
+      modeName = collection?.modes.find((mode) => mode.modeId === modeId)?.name;
     }
     return [{
       collectionId,
@@ -297,10 +391,7 @@ function extractExplicitVariableModes(value: unknown): UIVariableMode[] | undefi
 function resolveStyleName(styleId: unknown): string | undefined {
   if (typeof figma === 'undefined') return undefined;
   if (!styleId || styleId === figma.mixed) return undefined;
-  try {
-    const style = figma.getStyleById(styleId as string);
-    return style?.name;
-  } catch { return undefined; }
+  return lookupStyle(styleId as string)?.name;
 }
 
 function normalizeScaleMode(value: unknown): UIPaint['scaleMode'] | undefined {
@@ -1396,9 +1487,9 @@ function extractReferencedVariables(...sources: unknown[]): UIVariableDefinition
 
   for (const id of [...ids].sort()) {
     try {
-      const variable = figma.variables.getVariableById(id);
+      const variable = lookupVariable(id);
       if (!variable) continue;
-      const collection = figma.variables.getVariableCollectionById(variable.variableCollectionId);
+      const collection = lookupCollection(variable.variableCollectionId);
       const modeNames = new Map(collection?.modes.map((mode) => [mode.modeId, mode.name]) ?? []);
       const valuesByMode: NonNullable<UIVariableDefinition['valuesByMode']> = {};
       for (const [modeId, rawValue] of Object.entries(variable.valuesByMode ?? {})) {
@@ -1625,7 +1716,7 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
   if (nodeType === INSTANCE_TYPE) {
     const result: UISerializedNode = {
       ...base,
-      componentName: n.mainComponent?.name as string | undefined,
+      componentName: resolveMainComponentName(n),
       layout: extractLayout(n),
       style: extractStyle(n),
     };

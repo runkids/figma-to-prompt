@@ -72,10 +72,6 @@ async function composeMergedTiles(payload: MergedTilesPayload): Promise<string |
   return canvas.toDataURL(mime);
 }
 
-declare const __APP_VERSION__: string;
-
-const REPO = 'runkids/figma-to-prompt';
-
 const PROMPT_DETAIL_OPTIONS: { value: PromptDetailLevel; label: string }[] = [
   { value: 'compact', label: 'Compact' },
   { value: 'detailed', label: 'Detailed' },
@@ -105,16 +101,6 @@ function truncateToDepth(node: UISerializedNode, depth: number): UISerializedNod
 
 function sendToSandbox(msg: UIMessage): void {
   parent.postMessage({ pluginMessage: msg }, '*');
-}
-
-function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return -1;
-    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return 1;
-  }
-  return 0;
 }
 
 export function App() {
@@ -207,27 +193,6 @@ export function App() {
       merged: state.rawMerged,
     });
   }, [state.rawImages, state.rawMerged]);
-
-  // Best-effort GitHub release check; fully silent on failure.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        const latest = (data.tag_name as string).replace(/^v/, '');
-        if (compareVersions(__APP_VERSION__, latest) < 0 && !cancelled) {
-          dispatch({ type: 'UPDATE_AVAILABLE', version: latest, url: data.html_url as string });
-        }
-      } catch {
-        // offline / rate-limited
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Apply depth truncation to the raw node tree. null = full tree.
   const displayData = useMemo(() => {
@@ -336,7 +301,7 @@ export function App() {
         </div>
         <ExportCard state={state} dispatch={dispatch} />
       </div>
-      <Banners protocolMismatch={state.protocolMismatch} updateAvailable={state.updateAvailable} />
+      <Banners protocolMismatch={state.protocolMismatch} />
       <StatusBar state={state} />
       {isTextPreviewOpen && (
         <TextPreviewModal

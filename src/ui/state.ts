@@ -42,7 +42,6 @@ export interface State {
   /** Bumped whenever we need sandbox to re-export. Observed by an effect that postMessages. */
   exportRequestId: number;
   protocolMismatch: boolean;
-  updateAvailable: { version: string; url: string } | null;
 }
 
 export const initialState: State = {
@@ -67,7 +66,6 @@ export const initialState: State = {
   mergedImageName: '',
   exportRequestId: 0,
   protocolMismatch: false,
-  updateAvailable: null,
 };
 
 export type Action =
@@ -94,8 +92,7 @@ export type Action =
   | { type: 'NAME_OVERRIDE_CHANGED'; id: string; value: string }
   | { type: 'MOCK_IMAGE_PATH_CHANGED'; id: string; value: string }
   | { type: 'MERGED_NAME_CHANGED'; value: string }
-  | { type: 'PROTOCOL_MISMATCH' }
-  | { type: 'UPDATE_AVAILABLE'; version: string; url: string };
+  | { type: 'PROTOCOL_MISMATCH' };
 
 /** Orig (scale=0) returns uploaded pixels when possible and a source-aware PNG
  *  render for paint-specific variants. It is meaningless for merged exports
@@ -152,7 +149,6 @@ export function reducer(state: State, action: Action): State {
         qualityByFormat: state.qualityByFormat,
         mode: state.mode,
         protocolMismatch: state.protocolMismatch,
-        updateAvailable: state.updateAvailable,
       };
 
     case 'SELECTION_RECEIVED': {
@@ -285,8 +281,5 @@ export function reducer(state: State, action: Action): State {
 
     case 'PROTOCOL_MISMATCH':
       return { ...state, protocolMismatch: true };
-
-    case 'UPDATE_AVAILABLE':
-      return { ...state, updateAvailable: { version: action.version, url: action.url } };
   }
 }
