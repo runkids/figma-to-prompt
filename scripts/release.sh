@@ -63,10 +63,31 @@ node -e "
   fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 "
 
+echo ""
+echo "Running tests..."
+pnpm test
+
 # Rebuild so local dist/ matches the new version (CI=true → clean version, no -dev suffix)
 echo ""
 echo "Building..."
 CI=true pnpm build
+
+pnpm smoke:plugin
+
+# Publish-readiness gates: Figma uploads dist/ as-is, so catch a stale or
+# dirty bundle before it ships to the org.
+if grep -q "${NEW_VERSION}-dev" dist/ui.html; then
+  echo "Error: dist/ui.html still carries a -dev version"
+  exit 1
+fi
+if ! grep -q "${NEW_VERSION}" dist/ui.html; then
+  echo "Error: dist/ui.html does not contain v${NEW_VERSION} — stale build?"
+  exit 1
+fi
+if grep -qE 'fonts\.googleapis\.com|fonts\.gstatic\.com|api\.github\.com/repos' dist/ui.html; then
+  echo "Error: dist/ui.html references external hosts (manifest declares networkAccess: none)"
+  exit 1
+fi
 
 # Commit and tag
 git add package.json
@@ -74,7 +95,8 @@ git commit -m "release: v${NEW_VERSION}"
 git tag "v${NEW_VERSION}"
 
 echo ""
-echo "✅ v${NEW_VERSION} tagged locally"
+echo "✅ v${NEW_VERSION} tagged locally, dist/ is publish-ready"
 echo ""
-echo "Run this to publish:"
-echo "  git push origin main --tags"
+echo "Next steps:"
+echo "  1. git push origin main --tags"
+echo "  2. Figma Desktop → Plugins → Development → Figma to Prompt → Publish new version"
