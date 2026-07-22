@@ -100,6 +100,36 @@ function truncateToDepth(node: UISerializedNode, depth: number): UISerializedNod
   };
 }
 
+function simplifyNodes(node: UISerializedNode): UISerializedNode {
+  if (node.type === 'VECTOR' || node.type === 'BOOLEAN_OPERATION') {
+    return {
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      layout: node.layout
+        ? { width: node.layout.width, height: node.layout.height } as typeof node.layout
+        : undefined,
+    } as UISerializedNode;
+  }
+  if (node.type === 'INSTANCE') {
+    return {
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      componentName: node.componentName,
+      layout: node.layout,
+      style: node.style,
+      componentProperties: node.componentProperties,
+      children: [],
+    } as UISerializedNode;
+  }
+  if (!node.children) return node;
+  return {
+    ...node,
+    children: node.children.map(simplifyNodes),
+  };
+}
+
 function excludeChildren(
   node: UISerializedNode,
   excludedIds: Set<string>,
@@ -223,6 +253,7 @@ export function App() {
     if (state.excludedChildIds.size > 0) {
       tree = excludeChildren(tree, state.excludedChildIds);
     }
+    tree = simplifyNodes(tree);
     if (state.extractDepth !== null) {
       tree = truncateToDepth(tree, state.extractDepth);
     }
