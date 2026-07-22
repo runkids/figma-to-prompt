@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'preact/hooks';
+import { useEffect, useMemo, useReducer, useState } from 'preact/hooks';
 import { initialState, reducer } from './state';
 import { buildPrompt, sanitizeFileName } from './prompt';
 import { toSandboxFormat } from './transcode';
