@@ -17,6 +17,9 @@ export interface State {
   promptDetail: PromptDetailLevel;
   /** Truncate the extracted tree to this many levels deep. null = unlimited. */
   extractDepth: number | null;
+  /** IDs of direct children to exclude from output. Excluded children are
+   *  replaced with a shallow stub (name + type + size, no descendants). */
+  excludedChildIds: Set<string>;
   /** Preview images mirrored from the sandbox source. Download encoding is
    *  deferred until the user clicks Download so quality changes stay cheap. */
   images: Record<string, string>;
@@ -50,6 +53,7 @@ export const initialState: State = {
   promptTemplate: 'pixel-perfect',
   promptDetail: 'full',
   extractDepth: null,
+  excludedChildIds: new Set(),
   images: {},
   mergedImage: null,
   rawImages: {},
@@ -85,6 +89,8 @@ export type Action =
   | { type: 'PROMPT_TEMPLATE_CHANGED'; promptTemplate: PromptTemplate }
   | { type: 'PROMPT_DETAIL_CHANGED'; promptDetail: PromptDetailLevel }
   | { type: 'EXTRACT_DEPTH_CHANGED'; extractDepth: number | null }
+  | { type: 'CHILD_EXCLUSION_TOGGLED'; id: string }
+  | { type: 'CHILD_EXCLUSION_ALL'; exclude: boolean }
   | { type: 'MODE_CHANGED'; mode: ExportMode }
   | { type: 'SCALE_CHANGED'; scale: number }
   | { type: 'FORMAT_CHANGED'; format: ImageFormat }
@@ -176,6 +182,7 @@ export function reducer(state: State, action: Action): State {
         nameOverrides: {},
         mockImagePaths: {},
         mergedImageName: '',
+        excludedChildIds: new Set(),
         mode,
         scale,
         exportRequestId: needsRequest ? state.exportRequestId + 1 : state.exportRequestId,
@@ -207,6 +214,23 @@ export function reducer(state: State, action: Action): State {
 
     case 'EXTRACT_DEPTH_CHANGED':
       return { ...state, extractDepth: action.extractDepth };
+
+    case 'CHILD_EXCLUSION_TOGGLED': {
+      const next = new Set(state.excludedChildIds);
+      if (next.has(action.id)) next.delete(action.id);
+      else next.add(action.id);
+      return { ...state, excludedChildIds: next };
+    }
+
+    case 'CHILD_EXCLUSION_ALL': {
+      if (!action.exclude || !state.data?.children) {
+        return { ...state, excludedChildIds: new Set() };
+      }
+      return {
+        ...state,
+        excludedChildIds: new Set(state.data.children.map((c) => c.id)),
+      };
+    }
 
     case 'MODE_CHANGED': {
       const mode = action.mode;

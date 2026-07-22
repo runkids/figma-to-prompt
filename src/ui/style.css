@@ -704,6 +704,98 @@ body {
   cursor: not-allowed;
 }
 
+/* ── Children Filter ─────────────────────────────────── */
+.children-filter {
+  display: flex;
+  flex-direction: column;
+}
+
+.children-filter__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--fg);
+}
+
+.children-filter__count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted-fg);
+  margin-left: 6px;
+}
+
+.children-filter__arrow {
+  font-size: 10px;
+  color: var(--muted-fg);
+  transition: transform 150ms ease;
+}
+
+.children-filter__arrow.open {
+  transform: rotate(180deg);
+}
+
+.children-filter__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.children-filter__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--fg);
+  user-select: none;
+}
+
+.children-filter__item:hover {
+  background: var(--card);
+}
+
+.children-filter__item--all {
+  padding-bottom: 5px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.children-filter__item input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.children-filter__icon {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted-fg);
+}
+
+.children-filter__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 /* ── Chip Row (3-5 options) ───────────────────────────── */
 .chip-row {
   display: flex;

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useReducer, useState } from 'preact/hooks';
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'preact/hooks';
 import { initialState, reducer } from './state';
 import { buildPrompt, sanitizeFileName } from './prompt';
 import { toSandboxFormat } from './transcode';
 import { PROTOCOL_VERSION } from '../shared/types';
 import { rasterPixelSize } from '../shared/rasterScale';
 import type { ImageDataMessage, SandboxMessage, UIMessage } from '../shared/types';
+import { ChildrenFilter } from './components/ChildrenFilter';
 import { Header } from './components/Header';
 import { TabBar } from './components/TabBar';
 import { CodePanel } from './components/CodePanel';
@@ -96,6 +97,28 @@ function truncateToDepth(node: UISerializedNode, depth: number): UISerializedNod
   return {
     ...node,
     children: node.children.map((c) => truncateToDepth(c, depth - 1)),
+  };
+}
+
+function excludeChildren(
+  node: UISerializedNode,
+  excludedIds: Set<string>,
+): UISerializedNode {
+  if (!node.children || excludedIds.size === 0) return node;
+  return {
+    ...node,
+    children: node.children.map((c) => {
+      if (!excludedIds.has(c.id)) return c;
+      return {
+        id: c.id,
+        name: c.name,
+        type: c.type,
+        layout: c.layout
+          ? { ...c.layout, x: c.layout.x, y: c.layout.y }
+          : undefined,
+        children: [],
+      } as UISerializedNode;
+    }),
   };
 }
 
@@ -194,11 +217,17 @@ export function App() {
     });
   }, [state.rawImages, state.rawMerged]);
 
-  // Apply depth truncation to the raw node tree. null = full tree.
   const displayData = useMemo(() => {
-    if (!state.data || state.extractDepth === null) return state.data;
-    return truncateToDepth(state.data, state.extractDepth);
-  }, [state.data, state.extractDepth]);
+    if (!state.data) return state.data;
+    let tree = state.data;
+    if (state.excludedChildIds.size > 0) {
+      tree = excludeChildren(tree, state.excludedChildIds);
+    }
+    if (state.extractDepth !== null) {
+      tree = truncateToDepth(tree, state.extractDepth);
+    }
+    return tree;
+  }, [state.data, state.excludedChildIds, state.extractDepth]);
 
   // Lazy-derive the active tab's text so rapid frame switching only pays for
   // whichever view is visible. Previously the reducer computed JSON.stringify
@@ -285,6 +314,14 @@ export function App() {
               onChange={(v) => dispatch({ type: 'EXTRACT_DEPTH_CHANGED', extractDepth: v === '' ? null : Number(v) })}
             />
           </div>
+        )}
+        {state.data?.children && state.data.children.length > 0 && (
+          <ChildrenFilter
+            children={state.data.children}
+            excludedIds={state.excludedChildIds}
+            onToggle={(id) => dispatch({ type: 'CHILD_EXCLUSION_TOGGLED', id })}
+            onToggleAll={(exclude) => dispatch({ type: 'CHILD_EXCLUSION_ALL', exclude })}
+          />
         )}
         <div class={`copy-actions${state.data ? '' : ' copy-actions--single'}`}>
           {state.data && (
