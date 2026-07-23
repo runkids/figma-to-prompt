@@ -100,6 +100,42 @@ function truncateToDepth(node: UISerializedNode, depth: number): UISerializedNod
   };
 }
 
+const DEFAULT_PROTOTYPE = '{"overflowDirection":"none","overlayPositionType":"center","overlayBackground":{"type":"NONE"},"overlayBackgroundInteraction":"none"}';
+
+const GRID_DEFAULTS: Record<string, unknown> = {
+  gridRowAnchorIndex: -1,
+  gridColumnAnchorIndex: -1,
+  gridRowSpan: 1,
+  gridColumnSpan: 1,
+  gridChildHorizontalAlign: 'auto',
+  gridChildVerticalAlign: 'auto',
+};
+
+function stripLayout(layout: UISerializedNode['layout']): UISerializedNode['layout'] {
+  if (!layout) return layout;
+  const clean = { ...layout } as Record<string, unknown>;
+  delete clean.relativeTransform;
+  delete clean.renderBounds;
+  for (const [key, defaultVal] of Object.entries(GRID_DEFAULTS)) {
+    if (clean[key] === defaultVal) delete clean[key];
+  }
+  return clean as UISerializedNode['layout'];
+}
+
+function stripNode(node: UISerializedNode): UISerializedNode {
+  const n = { ...node };
+  // Strip redundant variable catalogs — Design Tokens section already covers this
+  delete (n as Record<string, unknown>).referencedVariables;
+  delete (n as Record<string, unknown>).variableBindings;
+  // Strip default prototype
+  if (n.prototype && JSON.stringify(n.prototype) === DEFAULT_PROTOTYPE) {
+    delete (n as Record<string, unknown>).prototype;
+  }
+  // Strip redundant layout fields
+  n.layout = stripLayout(n.layout);
+  return n;
+}
+
 function simplifyNodes(node: UISerializedNode): UISerializedNode {
   if (node.type === 'VECTOR' || node.type === 'BOOLEAN_OPERATION') {
     return {
@@ -112,7 +148,7 @@ function simplifyNodes(node: UISerializedNode): UISerializedNode {
     } as UISerializedNode;
   }
   if (node.type === 'INSTANCE') {
-    return {
+    return stripNode({
       id: node.id,
       name: node.name,
       type: node.type,
@@ -121,12 +157,13 @@ function simplifyNodes(node: UISerializedNode): UISerializedNode {
       style: node.style,
       componentProperties: node.componentProperties,
       children: [],
-    } as UISerializedNode;
+    } as UISerializedNode);
   }
-  if (!node.children) return node;
+  const cleaned = stripNode(node);
+  if (!cleaned.children) return cleaned;
   return {
-    ...node,
-    children: node.children.map(simplifyNodes),
+    ...cleaned,
+    children: cleaned.children.map(simplifyNodes),
   };
 }
 
