@@ -6,8 +6,9 @@ import { PROTOCOL_VERSION } from '../shared/types';
 import { rasterPixelSize } from '../shared/rasterScale';
 import type { ImageDataMessage, SandboxMessage, UIMessage } from '../shared/types';
 import { Header } from './components/Header';
+import { SettingsDialog } from './components/SettingsDialog';
 import { TabBar } from './components/TabBar';
-import { CodePanel } from './components/CodePanel';
+
 import { CopyButton } from './components/CopyButton';
 import { ExportCard } from './components/ExportCard';
 import { Banners } from './components/Banners';
@@ -99,6 +100,95 @@ function truncateToDepth(node: UISerializedNode, depth: number): UISerializedNod
   };
 }
 
+const DEFAULT_PROTOTYPE = '{"overflowDirection":"none","overlayPositionType":"center","overlayBackground":{"type":"NONE"},"overlayBackgroundInteraction":"none"}';
+
+const GRID_DEFAULTS: Record<string, unknown> = {
+  gridRowAnchorIndex: -1,
+  gridColumnAnchorIndex: -1,
+  gridRowSpan: 1,
+  gridColumnSpan: 1,
+  gridChildHorizontalAlign: 'auto',
+  gridChildVerticalAlign: 'auto',
+};
+
+function stripLayout(layout: UISerializedNode['layout']): UISerializedNode['layout'] {
+  if (!layout) return layout;
+  const clean = { ...layout } as Record<string, unknown>;
+  delete clean.relativeTransform;
+  delete clean.renderBounds;
+  for (const [key, defaultVal] of Object.entries(GRID_DEFAULTS)) {
+    if (clean[key] === defaultVal) delete clean[key];
+  }
+  return clean as UISerializedNode['layout'];
+}
+
+function stripNode(node: UISerializedNode): UISerializedNode {
+  const n = { ...node };
+  // Strip redundant variable catalogs — Design Tokens section already covers this
+  delete (n as Record<string, unknown>).referencedVariables;
+  delete (n as Record<string, unknown>).variableBindings;
+  // Strip default prototype
+  if (n.prototype && JSON.stringify(n.prototype) === DEFAULT_PROTOTYPE) {
+    delete (n as Record<string, unknown>).prototype;
+  }
+  // Strip redundant layout fields
+  n.layout = stripLayout(n.layout);
+  return n;
+}
+
+function simplifyNodes(node: UISerializedNode): UISerializedNode {
+  if (node.type === 'VECTOR' || node.type === 'BOOLEAN_OPERATION') {
+    return {
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      layout: node.layout
+        ? { width: node.layout.width, height: node.layout.height } as typeof node.layout
+        : undefined,
+    } as UISerializedNode;
+  }
+  if (node.type === 'INSTANCE') {
+    return stripNode({
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      componentName: node.componentName,
+      layout: node.layout,
+      style: node.style,
+      componentProperties: node.componentProperties,
+      children: [],
+    } as UISerializedNode);
+  }
+  const cleaned = stripNode(node);
+  if (!cleaned.children) return cleaned;
+  return {
+    ...cleaned,
+    children: cleaned.children.map(simplifyNodes),
+  };
+}
+
+function excludeChildren(
+  node: UISerializedNode,
+  excludedIds: Set<string>,
+): UISerializedNode {
+  if (!node.children || excludedIds.size === 0) return node;
+  return {
+    ...node,
+    children: node.children.map((c) => {
+      if (!excludedIds.has(c.id)) return c;
+      return {
+        id: c.id,
+        name: c.name,
+        type: c.type,
+        layout: c.layout
+          ? { ...c.layout, x: c.layout.x, y: c.layout.y }
+          : undefined,
+        children: [],
+      } as UISerializedNode;
+    }),
+  };
+}
+
 function sendToSandbox(msg: UIMessage): void {
   parent.postMessage({ pluginMessage: msg }, '*');
 }
@@ -106,6 +196,7 @@ function sendToSandbox(msg: UIMessage): void {
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [isTextPreviewOpen, setTextPreviewOpen] = useState(false);
+  const [isSettingsOpen, setSettingsOpen] = useState(false);
 
   // Sandbox → UI message bridge
   useEffect(() => {
@@ -194,11 +285,18 @@ export function App() {
     });
   }, [state.rawImages, state.rawMerged]);
 
-  // Apply depth truncation to the raw node tree. null = full tree.
   const displayData = useMemo(() => {
-    if (!state.data || state.extractDepth === null) return state.data;
-    return truncateToDepth(state.data, state.extractDepth);
-  }, [state.data, state.extractDepth]);
+    if (!state.data) return state.data;
+    let tree = state.data;
+    if (state.excludedChildIds.size > 0) {
+      tree = excludeChildren(tree, state.excludedChildIds);
+    }
+    tree = simplifyNodes(tree);
+    if (state.extractDepth !== null) {
+      tree = truncateToDepth(tree, state.extractDepth);
+    }
+    return tree;
+  }, [state.data, state.excludedChildIds, state.extractDepth]);
 
   // Lazy-derive the active tab's text so rapid frame switching only pays for
   // whichever view is visible. Previously the reducer computed JSON.stringify
@@ -222,6 +320,7 @@ export function App() {
       perSelection: state.mode === 'per-selection',
       promptTemplate: state.promptTemplate,
       promptDetail: state.promptDetail,
+      promptSections: state.promptSections,
     });
   }, [
     state.tab,
@@ -232,17 +331,13 @@ export function App() {
     state.mergedImageName,
     state.promptTemplate,
     state.promptDetail,
+    state.promptSections,
   ]);
 
   return (
     <>
       <Header />
       <TabBar tab={state.tab} onChange={(t) => dispatch({ type: 'TAB_CHANGED', tab: t })} />
-      <CodePanel
-        tab={state.tab}
-        text={text}
-        hasData={!!state.data}
-      />
       <div class="actions-bar">
         {state.tab === 'prompt' && state.data && (
           <div class="prompt-options">
@@ -275,15 +370,25 @@ export function App() {
           </div>
         )}
         {state.data && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span class="quality-label">Depth</span>
-            <ButtonGroup
-              ariaLabel="Extraction depth"
-              variant="chip"
-              options={DEPTH_OPTIONS}
-              value={state.extractDepth === null ? '' : String(state.extractDepth)}
-              onChange={(v) => dispatch({ type: 'EXTRACT_DEPTH_CHANGED', extractDepth: v === '' ? null : Number(v) })}
-            />
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
+              <span class="quality-label">Depth</span>
+              <ButtonGroup
+                ariaLabel="Extraction depth"
+                variant="chip"
+                options={DEPTH_OPTIONS}
+                value={state.extractDepth === null ? '' : String(state.extractDepth)}
+                onChange={(v) => dispatch({ type: 'EXTRACT_DEPTH_CHANGED', extractDepth: v === '' ? null : Number(v) })}
+              />
+            </div>
+            <button
+              type="button"
+              class="btn-settings"
+              title="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.53 1.53 0 0 1-2.29.95c-1.37-.84-2.94.73-2.1 2.1.46.75.06 1.73-.95 2.29-1.56.38-1.56 2.6 0 2.98.75.19 1.17.85.95 1.54-.06.22-.17.42-.33.58-.84 1.37.73 2.94 2.1 2.1a1.53 1.53 0 0 1 2.29.95c.38 1.56 2.6 1.56 2.98 0 .19-.75.85-1.17 1.54-.95.22.06.42.17.58.33 1.37.84 2.94-.73 2.1-2.1a1.53 1.53 0 0 1 .95-2.29c1.56-.38 1.56-2.6 0-2.98a1.53 1.53 0 0 1-.95-2.29c.84-1.37-.73-2.94-2.1-2.1a1.53 1.53 0 0 1-2.29-.95zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" clip-rule="evenodd"/></svg>
+            </button>
           </div>
         )}
         <div class={`copy-actions${state.data ? '' : ' copy-actions--single'}`}>
@@ -310,6 +415,16 @@ export function App() {
           onClose={() => setTextPreviewOpen(false)}
         />
       )}
+      <SettingsDialog
+        open={isSettingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        children={state.data?.children}
+        excludedIds={state.excludedChildIds}
+        onToggleChild={(id) => dispatch({ type: 'CHILD_EXCLUSION_TOGGLED', id })}
+        onToggleAllChildren={(exclude) => dispatch({ type: 'CHILD_EXCLUSION_ALL', exclude })}
+        promptSections={state.promptSections}
+        onToggleSection={(key) => dispatch({ type: 'PROMPT_SECTION_TOGGLED', key })}
+      />
     </>
   );
 }
