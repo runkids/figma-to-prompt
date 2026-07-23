@@ -60,7 +60,7 @@ export const initialState: State = {
   format: 'PNG',
   quality: DEFAULT_QUALITY,
   qualityByFormat: {},
-  mode: 'merged',
+  mode: 'per-selection',
   nameOverrides: {},
   mockImagePaths: {},
   mergedImageName: '',
