@@ -1722,7 +1722,8 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
     };
 
     // Extract variant / component properties (e.g. { State: "Active", Size: "Large" })
-    const props = n.componentProperties;
+    let props: typeof n.componentProperties | undefined;
+    try { props = n.componentProperties; } catch { /* component set has errors */ }
     if (props && typeof props === 'object') {
       const mapped: Record<string, string> = {};
       const details: NonNullable<UISerializedNode['componentPropertyDetails']> = {};
