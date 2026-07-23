@@ -8,7 +8,7 @@ import type { ImageDataMessage, SandboxMessage, UIMessage } from '../shared/type
 import { Header } from './components/Header';
 import { SettingsDialog } from './components/SettingsDialog';
 import { TabBar } from './components/TabBar';
-import { CodePanel } from './components/CodePanel';
+
 import { CopyButton } from './components/CopyButton';
 import { ExportCard } from './components/ExportCard';
 import { Banners } from './components/Banners';
@@ -301,11 +301,6 @@ export function App() {
     <>
       <Header />
       <TabBar tab={state.tab} onChange={(t) => dispatch({ type: 'TAB_CHANGED', tab: t })} />
-      <CodePanel
-        tab={state.tab}
-        text={text}
-        hasData={!!state.data}
-      />
       <div class="actions-bar">
         {state.tab === 'prompt' && state.data && (
           <div class="prompt-options">
@@ -338,37 +333,37 @@ export function App() {
           </div>
         )}
         {state.data && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span class="quality-label">Depth</span>
-            <ButtonGroup
-              ariaLabel="Extraction depth"
-              variant="chip"
-              options={DEPTH_OPTIONS}
-              value={state.extractDepth === null ? '' : String(state.extractDepth)}
-              onChange={(v) => dispatch({ type: 'EXTRACT_DEPTH_CHANGED', extractDepth: v === '' ? null : Number(v) })}
-            />
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
+              <span class="quality-label">Depth</span>
+              <ButtonGroup
+                ariaLabel="Extraction depth"
+                variant="chip"
+                options={DEPTH_OPTIONS}
+                value={state.extractDepth === null ? '' : String(state.extractDepth)}
+                onChange={(v) => dispatch({ type: 'EXTRACT_DEPTH_CHANGED', extractDepth: v === '' ? null : Number(v) })}
+              />
+            </div>
+            <button
+              type="button"
+              class="btn-settings"
+              title="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.53 1.53 0 0 1-2.29.95c-1.37-.84-2.94.73-2.1 2.1.46.75.06 1.73-.95 2.29-1.56.38-1.56 2.6 0 2.98.75.19 1.17.85.95 1.54-.06.22-.17.42-.33.58-.84 1.37.73 2.94 2.1 2.1a1.53 1.53 0 0 1 2.29.95c.38 1.56 2.6 1.56 2.98 0 .19-.75.85-1.17 1.54-.95.22.06.42.17.58.33 1.37.84 2.94-.73 2.1-2.1a1.53 1.53 0 0 1 .95-2.29c1.56-.38 1.56-2.6 0-2.98a1.53 1.53 0 0 1-.95-2.29c.84-1.37-.73-2.94-2.1-2.1a1.53 1.53 0 0 1-2.29-.95zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" clip-rule="evenodd"/></svg>
+            </button>
           </div>
         )}
         <div class={`copy-actions${state.data ? '' : ' copy-actions--single'}`}>
           {state.data && (
-            <>
-              <button
-                type="button"
-                class="btn-settings"
-                title="Settings"
-                onClick={() => setSettingsOpen(true)}
-              >
-                ⚙
-              </button>
-              <button
-                type="button"
-                class="btn-secondary"
-                disabled={!text}
-                onClick={() => setTextPreviewOpen(true)}
-              >
-                {state.tab === 'json' ? 'Preview JSON' : 'Preview Prompt'}
-              </button>
-            </>
+            <button
+              type="button"
+              class="btn-secondary"
+              disabled={!text}
+              onClick={() => setTextPreviewOpen(true)}
+            >
+              {state.tab === 'json' ? 'Preview JSON' : 'Preview Prompt'}
+            </button>
           )}
           <CopyButton tab={state.tab} text={text} />
         </div>

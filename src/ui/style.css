@@ -711,9 +711,13 @@ body {
   background: var(--bg);
   color: var(--fg);
   padding: 0;
-  width: min(320px, calc(100vw - 32px));
+  width: min(280px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   box-shadow: 6px 6px 0 var(--fg);
+  margin: auto;
+  position: fixed;
+  inset: 0;
+  height: fit-content;
 }
 
 .settings-dialog::backdrop {
@@ -874,15 +878,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   background: var(--card);
   border: 2px solid var(--border);
   border-radius: 9999px;
   cursor: pointer;
   color: var(--muted-fg);
-  font-size: 14px;
   transition: all 150ms ease;
   flex-shrink: 0;
 }
