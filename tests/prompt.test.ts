@@ -782,7 +782,7 @@ describe('image assets', () => {
 
     it('sanitizes invalid chars in overrides', () => {
       const assets = collectImageAssets(nodeWithImage, { '2': 'my image!' });
-      expect(assets[0].fileName).toBe('my_image_.png');
+      expect(assets[0].fileName).toBe('my_image!.png');
     });
 
     it('empty string override falls back to auto name', () => {

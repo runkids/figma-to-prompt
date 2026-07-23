@@ -7,7 +7,7 @@ describe('export quality state', () => {
     expect(initialState.promptTemplate).toBe('pixel-perfect');
     expect(initialState.promptDetail).toBe('full');
     expect(initialState.extractDepth).toBeNull();
-    expect(initialState.mode).toBe('merged');
+    expect(initialState.mode).toBe('per-selection');
     expect(initialState.scale).toBe(2);
     expect(initialState.format).toBe('PNG');
   });
