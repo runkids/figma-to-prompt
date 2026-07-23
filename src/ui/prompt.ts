@@ -11,9 +11,10 @@ import { getImageAssetKey, hasRenderSpecificImagePaint } from '../shared/imageAs
 
 const DEFAULT_GEOMETRY_LIMIT = 80;
 
-/** Sanitize user-supplied filename fragments to the same character class used by auto-naming */
+/** Sanitize user-supplied filename fragments — keep Unicode letters/numbers,
+ *  only strip characters unsafe for filesystems and URLs. */
 export function sanitizeFileName(s: string): string {
-  return s.replace(/[^a-zA-Z0-9-_]/g, '_');
+  return s.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_');
 }
 
 /**
