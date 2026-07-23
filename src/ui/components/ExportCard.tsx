@@ -46,8 +46,8 @@ interface Props {
 }
 
 const MODE_OPTIONS = [
+  { value: 'per-selection' as ExportMode, label: 'Current layer' },
   { value: 'per-image' as ExportMode, label: 'Each image' },
-  { value: 'per-selection' as ExportMode, label: 'Each layer' },
   { value: 'merged' as ExportMode, label: 'Whole frame' },
 ];
 
