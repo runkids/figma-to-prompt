@@ -125,6 +125,9 @@ const figma = {
   getNodeById(id) {
     return nodes.get(id) ?? null;
   },
+  async getNodeByIdAsync(id) {
+    return nodes.get(id) ?? null;
+  },
   getImageByHash(hash) {
     return hash === 'image-hash' ? image : null;
   },
@@ -162,7 +165,7 @@ assert.equal(shownUi?.options.width, 480);
 assert.equal(shownUi?.options.height, 560);
 assert.equal(typeof figma.ui.onmessage, 'function');
 assert.equal(typeof listeners.get('selectionchange'), 'function');
-const selectionMessage = messages.find((message) => message.type === 'export-result');
+const selectionMessage = await waitForMessage('export-result');
 assert.equal(selectionMessage?.data.id, root.id);
 assert.equal(selectionMessage?.data.children?.[0]?.id, variant.id);
 
@@ -243,7 +246,7 @@ nodes.set(futureNode.id, futureNode);
 figma.currentPage.selection = [futureNode];
 const futureStart = messages.length;
 listeners.get('selectionchange')();
-const futureSelection = messages.slice(futureStart).find((message) => message.type === 'export-result');
+const futureSelection = await waitForMessage('export-result', futureStart);
 assert.equal(futureSelection?.data.id, futureNode.id);
 assert.equal(futureSelection?.data.type, 'FUTURE_MEDIA');
 
