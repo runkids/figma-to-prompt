@@ -5,8 +5,8 @@ import { toSandboxFormat } from './transcode';
 import { PROTOCOL_VERSION } from '../shared/types';
 import { rasterPixelSize } from '../shared/rasterScale';
 import type { ImageDataMessage, SandboxMessage, UIMessage } from '../shared/types';
-import { ChildrenFilter } from './components/ChildrenFilter';
 import { Header } from './components/Header';
+import { SettingsDialog } from './components/SettingsDialog';
 import { TabBar } from './components/TabBar';
 import { CodePanel } from './components/CodePanel';
 import { CopyButton } from './components/CopyButton';
@@ -159,6 +159,7 @@ function sendToSandbox(msg: UIMessage): void {
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [isTextPreviewOpen, setTextPreviewOpen] = useState(false);
+  const [isSettingsOpen, setSettingsOpen] = useState(false);
 
   // Sandbox → UI message bridge
   useEffect(() => {
@@ -282,6 +283,7 @@ export function App() {
       perSelection: state.mode === 'per-selection',
       promptTemplate: state.promptTemplate,
       promptDetail: state.promptDetail,
+      promptSections: state.promptSections,
     });
   }, [
     state.tab,
@@ -292,6 +294,7 @@ export function App() {
     state.mergedImageName,
     state.promptTemplate,
     state.promptDetail,
+    state.promptSections,
   ]);
 
   return (
@@ -346,24 +349,26 @@ export function App() {
             />
           </div>
         )}
-        {state.data?.children && state.data.children.length > 0 && (
-          <ChildrenFilter
-            children={state.data.children}
-            excludedIds={state.excludedChildIds}
-            onToggle={(id) => dispatch({ type: 'CHILD_EXCLUSION_TOGGLED', id })}
-            onToggleAll={(exclude) => dispatch({ type: 'CHILD_EXCLUSION_ALL', exclude })}
-          />
-        )}
         <div class={`copy-actions${state.data ? '' : ' copy-actions--single'}`}>
           {state.data && (
-            <button
-              type="button"
-              class="btn-secondary"
-              disabled={!text}
-              onClick={() => setTextPreviewOpen(true)}
-            >
-              {state.tab === 'json' ? 'Preview JSON' : 'Preview Prompt'}
-            </button>
+            <>
+              <button
+                type="button"
+                class="btn-settings"
+                title="Settings"
+                onClick={() => setSettingsOpen(true)}
+              >
+                ⚙
+              </button>
+              <button
+                type="button"
+                class="btn-secondary"
+                disabled={!text}
+                onClick={() => setTextPreviewOpen(true)}
+              >
+                {state.tab === 'json' ? 'Preview JSON' : 'Preview Prompt'}
+              </button>
+            </>
           )}
           <CopyButton tab={state.tab} text={text} />
         </div>
@@ -378,6 +383,16 @@ export function App() {
           onClose={() => setTextPreviewOpen(false)}
         />
       )}
+      <SettingsDialog
+        open={isSettingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        children={state.data?.children}
+        excludedIds={state.excludedChildIds}
+        onToggleChild={(id) => dispatch({ type: 'CHILD_EXCLUSION_TOGGLED', id })}
+        onToggleAllChildren={(exclude) => dispatch({ type: 'CHILD_EXCLUSION_ALL', exclude })}
+        promptSections={state.promptSections}
+        onToggleSection={(key) => dispatch({ type: 'PROMPT_SECTION_TOGGLED', key })}
+      />
     </>
   );
 }

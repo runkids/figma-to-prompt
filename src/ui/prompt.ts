@@ -1023,6 +1023,13 @@ export interface BuildPromptOptions {
   promptTemplate?: PromptTemplate;
   /** Output depth: compact omits helper sections, full expands geometry. */
   promptDetail?: PromptDetailLevel;
+  /** Toggle optional prompt sections. */
+  promptSections?: PromptSections;
+}
+
+export interface PromptSections {
+  interactionContract?: boolean;
+  componentApi?: boolean;
 }
 
 /**
@@ -1115,14 +1122,20 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
     );
   }
 
-  const interactionContract = buildInteractionContractSection(node);
-  if (interactionContract) {
-    sections.push(interactionContract);
+  const promptSections = options?.promptSections;
+
+  if (promptSections?.interactionContract !== false) {
+    const interactionContract = buildInteractionContractSection(node);
+    if (interactionContract) {
+      sections.push(interactionContract);
+    }
   }
 
-  const componentApi = buildComponentApiSection(node);
-  if (componentApi) {
-    sections.push(componentApi);
+  if (promptSections?.componentApi !== false) {
+    const componentApi = buildComponentApiSection(node);
+    if (componentApi) {
+      sections.push(componentApi);
+    }
   }
 
   if (promptDetail !== 'compact') {

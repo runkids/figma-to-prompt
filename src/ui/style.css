@@ -704,56 +704,137 @@ body {
   cursor: not-allowed;
 }
 
-/* ── Children Filter ─────────────────────────────────── */
-.children-filter {
-  display: flex;
-  flex-direction: column;
+/* ── Settings Dialog ─────────────────────────────────── */
+.settings-dialog {
+  border: 2px solid var(--fg);
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 0;
+  width: min(320px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  box-shadow: 6px 6px 0 var(--fg);
 }
 
-.children-filter__toggle {
+.settings-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.settings-dialog__content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+  max-height: calc(100vh - 80px);
+}
+
+.settings-dialog__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
+}
+
+.settings-dialog__title {
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.settings-dialog__close {
+  width: 24px;
+  height: 24px;
   padding: 0;
   background: none;
-  border: none;
+  border: 2px solid var(--border);
+  border-radius: 9999px;
   cursor: pointer;
+  color: var(--muted-fg);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-dialog__close:hover {
+  border-color: var(--fg);
   color: var(--fg);
 }
 
-.children-filter__count {
-  font-size: 11px;
+.settings-dialog__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-dialog__section-title {
+  font-family: var(--font-heading);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-fg);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-dialog__count {
   font-weight: 400;
-  color: var(--muted-fg);
   margin-left: 6px;
+  font-size: 11px;
 }
 
-.children-filter__arrow {
-  font-size: 10px;
+.settings-dialog__toggle-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-dialog__toggle-item:hover {
+  background: var(--muted);
+}
+
+.settings-dialog__toggle-item input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.settings-dialog__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-dialog__desc {
+  display: block;
+  font-size: 11px;
   color: var(--muted-fg);
-  transition: transform 150ms ease;
+  line-height: 1.3;
 }
 
-.children-filter__arrow.open {
-  transform: rotate(180deg);
-}
-
-.children-filter__list {
+.settings-dialog__children-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-top: 6px;
-  max-height: 160px;
+  max-height: 180px;
   overflow-y: auto;
   padding-right: 4px;
 }
 
-.children-filter__item {
+.settings-dialog__child-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 4px;
+  padding: 4px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 11px;
@@ -761,18 +842,18 @@ body {
   user-select: none;
 }
 
-.children-filter__item:hover {
-  background: var(--card);
+.settings-dialog__child-item:hover {
+  background: var(--muted);
 }
 
-.children-filter__item--all {
-  padding-bottom: 5px;
+.settings-dialog__child-item--all {
+  padding-bottom: 6px;
   margin-bottom: 2px;
   border-bottom: 1px solid var(--border);
   font-weight: 600;
 }
 
-.children-filter__item input[type="checkbox"] {
+.settings-dialog__child-item input[type="checkbox"] {
   flex-shrink: 0;
   width: 14px;
   height: 14px;
@@ -781,7 +862,7 @@ body {
   cursor: pointer;
 }
 
-.children-filter__icon {
+.settings-dialog__icon {
   flex-shrink: 0;
   width: 14px;
   text-align: center;
@@ -789,11 +870,27 @@ body {
   color: var(--muted-fg);
 }
 
-.children-filter__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+.btn-settings {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 9999px;
+  cursor: pointer;
+  color: var(--muted-fg);
+  font-size: 14px;
+  transition: all 150ms ease;
+  flex-shrink: 0;
+}
+
+.btn-settings:hover {
+  border-color: var(--fg);
+  color: var(--fg);
+  box-shadow: 2px 2px 0 var(--fg);
 }
 
 /* ── Chip Row (3-5 options) ───────────────────────────── */
