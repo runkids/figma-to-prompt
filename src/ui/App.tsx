@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useState } from 'preact/hooks';
 import { initialState, reducer } from './state';
-import { buildPrompt, sanitizeFileName } from './prompt';
+import { buildPrompt, sanitizeFileName, simplifyForJson } from './prompt';
 import { toSandboxFormat } from './transcode';
 import { PROTOCOL_VERSION } from '../shared/types';
 import { rasterPixelSize } from '../shared/rasterScale';
@@ -97,73 +97,6 @@ function truncateToDepth(node: UISerializedNode, depth: number): UISerializedNod
   return {
     ...node,
     children: node.children.map((c) => truncateToDepth(c, depth - 1)),
-  };
-}
-
-const DEFAULT_PROTOTYPE = '{"overflowDirection":"none","overlayPositionType":"center","overlayBackground":{"type":"NONE"},"overlayBackgroundInteraction":"none"}';
-
-const GRID_DEFAULTS: Record<string, unknown> = {
-  gridRowAnchorIndex: -1,
-  gridColumnAnchorIndex: -1,
-  gridRowSpan: 1,
-  gridColumnSpan: 1,
-  gridChildHorizontalAlign: 'auto',
-  gridChildVerticalAlign: 'auto',
-};
-
-function stripLayout(layout: UISerializedNode['layout']): UISerializedNode['layout'] {
-  if (!layout) return layout;
-  const clean = { ...layout } as Record<string, unknown>;
-  delete clean.relativeTransform;
-  delete clean.renderBounds;
-  for (const [key, defaultVal] of Object.entries(GRID_DEFAULTS)) {
-    if (clean[key] === defaultVal) delete clean[key];
-  }
-  return clean as UISerializedNode['layout'];
-}
-
-function stripNode(node: UISerializedNode): UISerializedNode {
-  const n = { ...node };
-  // Strip redundant variable catalogs — Design Tokens section already covers this
-  delete (n as Record<string, unknown>).referencedVariables;
-  delete (n as Record<string, unknown>).variableBindings;
-  // Strip default prototype
-  if (n.prototype && JSON.stringify(n.prototype) === DEFAULT_PROTOTYPE) {
-    delete (n as Record<string, unknown>).prototype;
-  }
-  // Strip redundant layout fields
-  n.layout = stripLayout(n.layout);
-  return n;
-}
-
-function simplifyNodes(node: UISerializedNode): UISerializedNode {
-  if (node.type === 'VECTOR' || node.type === 'BOOLEAN_OPERATION') {
-    return {
-      id: node.id,
-      name: node.name,
-      type: node.type,
-      layout: node.layout
-        ? { width: node.layout.width, height: node.layout.height } as typeof node.layout
-        : undefined,
-    } as UISerializedNode;
-  }
-  if (node.type === 'INSTANCE') {
-    return stripNode({
-      id: node.id,
-      name: node.name,
-      type: node.type,
-      componentName: node.componentName,
-      layout: node.layout,
-      style: node.style,
-      componentProperties: node.componentProperties,
-      children: [],
-    } as UISerializedNode);
-  }
-  const cleaned = stripNode(node);
-  if (!cleaned.children) return cleaned;
-  return {
-    ...cleaned,
-    children: cleaned.children.map(simplifyNodes),
   };
 }
 
@@ -291,7 +224,6 @@ export function App() {
     if (state.excludedChildIds.size > 0) {
       tree = excludeChildren(tree, state.excludedChildIds);
     }
-    tree = simplifyNodes(tree);
     if (state.extractDepth !== null) {
       tree = truncateToDepth(tree, state.extractDepth);
     }
@@ -305,7 +237,7 @@ export function App() {
   // arrivals, export-setting toggles).
   const text = useMemo(() => {
     if (!displayData) return '';
-    if (state.tab === 'json') return JSON.stringify(displayData, null, 2);
+    if (state.tab === 'json') return JSON.stringify(simplifyForJson(displayData), null, 2);
     const merged = state.mode === 'merged' && displayData.layout
       ? {
           name: state.mergedImageName.trim() || sanitizeFileName(displayData.name),

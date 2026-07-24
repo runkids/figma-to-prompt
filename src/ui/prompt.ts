@@ -731,8 +731,64 @@ export function buildTreeOutline(node: UISerializedNode): string {
  * Returns the node tree as a single-line JSON string.
  * No conversion, no custom format — raw data the AI can parse natively.
  */
+// ── Node simplification for JSON output ────────────────
+// Reduces token count in the Component Structure JSON without
+// affecting analysis sections (tokens, interactions, component API).
+
+const DEFAULT_PROTOTYPE_JSON = '{"overflowDirection":"none","overlayPositionType":"center","overlayBackground":{"type":"NONE"},"overlayBackgroundInteraction":"none"}';
+
+const GRID_DEFAULTS: Record<string, unknown> = {
+  gridRowAnchorIndex: -1,
+  gridColumnAnchorIndex: -1,
+  gridRowSpan: 1,
+  gridColumnSpan: 1,
+  gridChildHorizontalAlign: 'auto',
+  gridChildVerticalAlign: 'auto',
+};
+
+function stripLayoutForJson(layout: UISerializedNode['layout']): UISerializedNode['layout'] {
+  if (!layout) return layout;
+  const clean = { ...layout } as Record<string, unknown>;
+  delete clean.relativeTransform;
+  delete clean.renderBounds;
+  for (const [key, defaultVal] of Object.entries(GRID_DEFAULTS)) {
+    if (clean[key] === defaultVal) delete clean[key];
+  }
+  return clean as unknown as UISerializedNode['layout'];
+}
+
+function stripNodeForJson(node: UISerializedNode): UISerializedNode {
+  const n = { ...node };
+  delete (n as Record<string, unknown>).referencedVariables;
+  delete (n as Record<string, unknown>).variableBindings;
+  if (n.prototype && JSON.stringify(n.prototype) === DEFAULT_PROTOTYPE_JSON) {
+    delete (n as Record<string, unknown>).prototype;
+  }
+  n.layout = stripLayoutForJson(n.layout);
+  return n;
+}
+
+export function simplifyForJson(node: UISerializedNode): UISerializedNode {
+  if (node.type === 'VECTOR' || node.type === 'BOOLEAN_OPERATION') {
+    return {
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      layout: node.layout
+        ? { width: node.layout.width, height: node.layout.height } as typeof node.layout
+        : undefined,
+    } as UISerializedNode;
+  }
+  const cleaned = stripNodeForJson(node);
+  if (!cleaned.children) return cleaned;
+  return {
+    ...cleaned,
+    children: cleaned.children.map(simplifyForJson),
+  };
+}
+
 export function buildNodeDetails(node: UISerializedNode): string {
-  return JSON.stringify(node);
+  return JSON.stringify(simplifyForJson(node));
 }
 
 // ── Geometry Checklist ───────────────────────────────────

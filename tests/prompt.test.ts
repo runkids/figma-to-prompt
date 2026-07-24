@@ -567,7 +567,7 @@ describe('buildNodeDetails', () => {
     expect(parsed.children[2].componentName).toBe('Icon/Arrow');
   });
 
-  it('preserves vector path data', () => {
+  it('simplifies VECTOR nodes to id/name/type/size only', () => {
     const node: UISerializedNode = {
       id: '1',
       name: 'Icon',
@@ -576,7 +576,7 @@ describe('buildNodeDetails', () => {
       vectorPaths: [{ windingRule: 'NONZERO', data: 'M 7 4 L 17 12 L 7 20 Z' }],
     };
     const parsed = JSON.parse(buildNodeDetails(node));
-    expect(parsed.vectorPaths).toEqual([{ windingRule: 'NONZERO', data: 'M 7 4 L 17 12 L 7 20 Z' }]);
+    expect(parsed).toEqual({ id: '1', name: 'Icon', type: 'VECTOR', layout: { width: 24, height: 24 } });
   });
 
   it('is a single line (no newlines)', () => {
