@@ -331,9 +331,9 @@ async function exportImages(
   if (imageNodes.length === 0) return;
 
   const images: Record<string, string> = {};
-  const sourceRasterEvidence = format === 'SVG'
-    ? {}
-    : await measureSourceRasterEvidence(
+  const evidencePromise = format === 'SVG'
+    ? Promise.resolve({} as Record<string, ImageSourceRasterEvidence>)
+    : measureSourceRasterEvidence(
         scale === 0 ? imageNodes.filter((image) => image.renderAtOriginalScale) : imageNodes,
       );
 
@@ -343,6 +343,7 @@ async function exportImages(
   // upstream in Figma; we honor the user's format choice rather than silently
   // downgrading to PNG.
   if (scale === 0) {
+    const sourceRasterEvidence = await evidencePromise;
     // Original quality: getImageByHash returns the uploaded raster at full resolution.
     // If the same hash appears with different rendered paint metadata, export the
     // node instead so crop/filter/opacity variants do not collapse to one file.
@@ -380,7 +381,8 @@ async function exportImages(
       } catch { /* skip */ }
     }
   } else {
-    // Render at scale: exportAsync produces the node as-rendered at chosen size
+    // Render at scale: exportAsync produces the node as-rendered at chosen size.
+    // Evidence measurement runs in parallel since it's only used for warnings.
     const mime = format === 'JPG' ? 'image/jpeg' : format === 'SVG' ? 'image/svg+xml' : 'image/png';
     for (const img of imageNodes) {
       if (exportId !== currentExportId) return;
@@ -397,6 +399,7 @@ async function exportImages(
     }
   }
 
+  const sourceRasterEvidence = await evidencePromise;
   if (exportId !== currentExportId) return;
   const msg: SandboxMessage = {
     type: 'image-data',
@@ -420,9 +423,9 @@ async function exportPerSelection(
   const effectiveScale = scale === 0 ? MIN_SHARP_RASTER_SCALE : scale;
   const mime = format === 'JPG' ? 'image/jpeg' : format === 'SVG' ? 'image/svg+xml' : 'image/png';
   const images: Record<string, string> = {};
-  const sourceRasterEvidence = format === 'SVG' || !lastNormalized
-    ? {}
-    : await measureSourceRasterEvidence(collectImageNodes(lastNormalized));
+  const evidencePromise = format === 'SVG' || !lastNormalized
+    ? Promise.resolve({} as Record<string, ImageSourceRasterEvidence>)
+    : measureSourceRasterEvidence(collectImageNodes(lastNormalized));
 
   for (const node of selection) {
     if (exportId !== currentExportId) return;
@@ -436,6 +439,7 @@ async function exportPerSelection(
     } catch { /* skip */ }
   }
 
+  const sourceRasterEvidence = await evidencePromise;
   if (exportId !== currentExportId) return;
   const msg: SandboxMessage = {
     type: 'image-data',
