@@ -2,6 +2,8 @@
 
 A Figma plugin that captures a selection as structured JSON and an AI-ready Markdown prompt. Feed the output to ChatGPT, Claude, or any LLM to generate frontend components — then verify the result pixel by pixel without leaving Figma.
 
+> **Using a coding agent (Claude Code, Cursor, Codex, Pi)?** Try **[figlens](https://github.com/runkids/figlens)**. It reads a saved `.fig` (File > Save local copy) directly on the agent's machine over CLI or MCP, so the agent gets layout, text, variables, assets and reference renders with no plugin step, Figma app, login or API quota. Use Figma to Prompt when you want to capture and verify pixel by pixel from inside Figma.
+
 ![Demo](.github/workflows/assets/demo.png)
 
 ## Features
